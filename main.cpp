@@ -7,65 +7,50 @@
 using namespace std;
 
 
-// Debug file stream
-ofstream debugFile("debug.log");  // Will create/overwrite debug.log
-
-
-int fallHeight(const vector<vector<int>>& board, int x) {
-    int y = board[x].size();
-    while (y > 0 && board[x][y - 1] == 0) {
-        y--;
-    }
-    return y;
-}
-
-int strategy(const vector<vector<int>>& board, int H) {
-    int x = 0;
-    while (x < board.size() && board[x][H - 1] != 0) {
-        x++;
-    }
-    return x;
-}
-
 int main() {
-    if (!debugFile) {
-        cerr << "Error opening debug file!" << endl;
-        return 1;
-    }
-
     int W, H, M, N, P, X, Y;
     cin >> W >> H;  // size of the board
-    cin >> M;  // grow M blocks per round
+    cin >> M;  // grow 1 block every M rounds
     cin >> N >> P;  // nb of player and player's turn
 
-    debugFile << "Initialized with W=" << W << " H=" << H << " M=" << M << " N=" << N << " P=" << P << endl;
+    cout << "> Received grid size: " << W << "x" << H << endl;
+    cout << "> Growth rate: every " << M << " turns" << endl;
+    cout << "> Number of players: " << N << " (I am player " << P << ")" << endl;
 
     unordered_map<int, vector<pair<int, int>>> Players;
     for (int i = 0; i < N; i++) {
         cin >> X >> Y;
         Players[i].push_back(make_pair(X, Y));
-        debugFile << "Player " << i << " starts at (" << X << "," << Y << ")" << endl;
+        cout << "> Player " << (i+1) << " starts at (" << X << "," << Y << ")" << endl;
     }
 
-    vector<vector<int>> board(W, vector<int>(H, 0));
-    int player = 0;
+    // Directions to cycle through
+    const string directions[] = {"right", "down", "left", "up"};
+    int dir_index = 0;
 
-    while (true) {
-        player = (player % N) + 1;
+    // Immediate move if we're first player
+    if(P == 1) {
+        cout << directions[dir_index++] << endl;
+        dir_index %= 4;
+    }
 
-        int x;
-
-        if (player == P) {
-            x = strategy(board, H);
-            cout << x << endl;
-        } else {
-            cin >> x;
+    // Game loop
+    string move;
+    int turn = 0;
+    while(true) {        
+        // Read opponent moves
+        getline(cin, move);
+        if(!move.empty()) {
+            cout << "> Received opponent move: " << move << endl;
         }
 
-        if (x >= 0 && x < W) {
-            int y = fallHeight(board, x);
-            board[x][y] = player;
-        }
+        // Send our move
+        cout << "> Choosing direction: " << directions[dir_index] << endl;
+        cout << directions[dir_index++] << endl;
+        dir_index %= 4;
+        
+        // Flush output buffer
+        cout.flush();
     }
 
     return 0;
