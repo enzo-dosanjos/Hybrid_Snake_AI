@@ -10,42 +10,86 @@
 using namespace std;
 
 
-struct inputCanals
+struct inputMinMaxAvg
 {
-    bool botHead;
-    bool botBody;
-    bool oppHead;
-    bool oppBody;
-
-    inputCanals(bool bH = false, bool bB = false, bool oH = false, bool oB = false)
-                : botHead(bH), botBody(bB), oppHead(oH), oppBody(oB) {}
-};
-
-struct inputMaxMinAvg
-{
-    int max;
-    int min;
-    int avg;
-    inputMaxMinAvg() : max(0), min(1000000), avg(0) {} // Valeurs d'initialisation (hard coded mais bon, ça devrait suffir)
+    float min;
+    float max;
+    float avg;
 };
 
 
-vector<double> multiplyMatrix(const vector<double>& row, const vector<vector<double>>& matrix) {
-    const int M = matrix[0].size();
-    vector<double> result(M, 0.0);
+struct Layer {
+    string type;                // activation function (ex: ReLU)
+    int input_size;
+    int output_size;
 
-    // Optimized multiplication
-    for (int i = 0; i < row.size(); ++i)
-    {
-        const double row_val = row[i];
-        for (int j = 0; j < M; ++j)
-        {
-            result[j] += row_val * matrix[i][j];
+    float *weights;
+    float *biases;
+    float *output;
+
+    float *weight_gradient;
+    float *bias_gradient;
+    float *error;
+};
+
+
+class NNAI
+{
+    public:
+        void ReLU(float *vals, int len) {
+            for (int i = 0; i < len; i++) {
+                if (vals[i] < 0) {
+                    vals[i] = 0;
+                }
+            }
+        } //----- end of ReLU
+
+
+        vector<double> multiplyMatrix(const vector<double>& row, const vector<vector<double>>& matrix) {
+            const int M = matrix[0].size();
+            vector<double> result(M, 0.0);
+        
+            // Optimized multiplication
+            for (int i = 0; i < row.size(); ++i)
+            {
+                const double row_val = row[i];
+                for (int j = 0; j < M; ++j)
+                {
+                    result[j] += row_val * matrix[i][j];
+                }
+            }
+        
+            return result;
+        } //----- end of multiplyMatrix
+
+
+        void initLayer (float *layer_weight, float *layer_bias, int input_size, int layer_size) {
+            // Initialize the random number generator
+            srand(static_cast<unsigned int>(time(0)));
+        
+            // initialise weight array with random values
+            for (int i = 0; i < input_size * layer_size; i++) {
+                layer_weight[i] = static_cast<float>(rand()) / RAND_MAX * 0.2f - 0.1f; // Uniform distribution between -0.1 and 0.1;
+        
+                if (i < layer_size) {
+                    layer_bias[i] = 0; // Initialise biases to 0
+                }
+            }
+        } //----- end of initLayer
+
+
+        // Constructors and Destructors
+        NNAI () {
+
         }
-    }
 
-    return result;
-}
+        ~NNAI () {
+
+        }
+
+    protected:
+        vector<Layer> NN;
+};
 
 
 int main() {
@@ -81,8 +125,7 @@ int main() {
 
 
     while (true) {
-        vector<inputCanals> board(H * W, inputCanals());
-
+        vector<bool> board(H * W * 4, false);  // 4 Canals for each case of the board
         vector<float> inputs;
 
         // Read and process moves from all previous players in the current round
@@ -130,29 +173,32 @@ int main() {
             int playerNb = player.first;
             const deque<coord>& snake = player.second;
 
-            inputMaxMinAvg playerToBot;
+            inputMinMaxAvg playerToBot;
+            inputMinMaxAvg botToPlayer;
+            botToPlayer.min = playerToBot.min = sqrt(pow(W, 2) + pow(H, 2));
+            botToPlayer.avg = playerToBot.avg = botToPlayer.max = playerToBot.max = 0;
 
             for (int i = 0; i < snake.size(); i++)
             {
-                int x = snake[i].first;
-                int y = snake[i].second;
-                int index = y * W + x; // 2D coords to index
+                float x = snake[i].first;
+                float y = snake[i].second;
+                int index = (y * W + x) * 4; // 2D coords to index
 
                 if (playerNb == P)
                 {
                     if (i == 0)
                     {
-                        board[index].botHead = true; // Head of the bot's snake
+                        board[index] = true; // Head of the bot's snake
                     }
                     else
                     {
-                        board[index].botBody = true; // Body of the bot's snake
+                        board[index + 1] = true; // Body of the bot's snake
                     }
                 }
                 else
                 {
-                    int botHeadX = Players[P][0].first;
-                    int botHeadY = Players[P][0].second;
+                    float botHeadX = Players[P][0].first;
+                    float botHeadY = Players[P][0].second;
                     float dist = sqrt(pow(abs(x-botHeadX), 2) + pow(abs(y-botHeadY), 2));
 
                     playerToBot.avg += dist;
@@ -169,15 +215,12 @@ int main() {
 
                     if (i == 0)
                     {
-                        board[index].oppHead = true; // Head of an opponent's snake
+                        board[index + 2] = true; // Head of an opponent's snake
 
-                        inputMaxMinAvg botToPlayer;
-                        botToPlayer.max = botToPlayer.min = sqrt(pow(W, 2) + pow(H, 2));
-                        botToPlayer.avg = 0;
                         for (int j = 0; j < snake.size(); j++)
                         {
-                            int botX = Players[P][j].first;
-                            int botY = Players[P][j].second;
+                            float botX = Players[P][j].first;
+                            float botY = Players[P][j].second;
                             dist = sqrt(pow(abs(x - botX), 2) + pow(abs(y - botY), 2));
                             botToPlayer.avg += dist;
 
@@ -193,25 +236,27 @@ int main() {
                         }
                         
                         botToPlayer.avg /= snake.size();
-
-                        inputs.push_back(botToPlayer.min);
-                        inputs.push_back(botToPlayer.max);
-                        inputs.push_back(botToPlayer.avg);
-
                     }
                     else
                     {
-                        board[index].oppBody = true; // Body of an opponent's snake
+                        board[index + 3] = true; // Body of an opponent's snake
                     }
 
                 }
             }
 
-            playerToBot.avg /= snake.size();
+            if (playerNb != P)
+            {
+                playerToBot.avg /= snake.size();
 
-            inputs.push_back(playerToBot.min);
-            inputs.push_back(playerToBot.max);
-            inputs.push_back(playerToBot.avg);
+                inputs.push_back(playerToBot.min);
+                inputs.push_back(playerToBot.max);
+                inputs.push_back(playerToBot.avg);
+
+                inputs.push_back(botToPlayer.min);
+                inputs.push_back(botToPlayer.max);
+                inputs.push_back(botToPlayer.avg);
+            }
 
         }
 
@@ -222,8 +267,8 @@ int main() {
             cout << "> ";
             for (int x = 0; x < W; ++x)
             {
-                int index = y * W + x;
-                cout << "(" << board[index].botHead << board[index].botBody << board[index].oppHead << board[index].oppBody << ") ";
+                int index = (y * W + x) * 4;
+                cout << "(" << board[index] << board[index + 1] << board[index + 2] << board[index + 3] << ") ";
             }
             cout << endl;
         }
@@ -231,6 +276,13 @@ int main() {
         // Last Inputs : growth and snake size
         inputs.push_back(M);
         inputs.push_back(Players[1].size());
+
+        cout << "> ";
+        for (auto input : inputs)
+        {
+            cout << input << ", ";
+        }
+        cout << endl;
 
         round++;
 
