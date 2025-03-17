@@ -1,297 +1,604 @@
+/*************************************************************************
+main - Main function of the program
+                             -------------------
+    copyright            : (C) 2025 by Enzo DOS ANJOS
+*************************************************************************/
+
 #include <iostream>
-#include <fstream>
-#include <unordered_map>
-#include <map>
-#include <utility>
-#include <deque>
-#include <vector>
-#include <cmath>
+#include <algorithm>
+
+// TCP communication
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
+#include <thread>    // Pour std::this_thread
+#include <cstring>
 
 using namespace std;
 
+#include "include/Utils.h"
+#include "include/Minimax.h"
+#include "include/Structs.h"
+#include "include/NNAI.h"
 
-struct inputMinMaxAvg
+
+void send_transition(const Transition &t)
+// Algorithm : Send transition to the TCP training server
 {
-    float min;
-    float max;
-    float avg;
-};
+    const int max_retries = 3;
+    int retry_count = 0;
 
-
-struct Layer {
-    string type;                // activation function (ex: ReLU)
-    int input_size;
-    int output_size;
-
-    float *weights;
-    float *biases;
-    float *output;
-
-    float *weight_gradient;
-    float *bias_gradient;
-    float *error;
-};
-
-
-class NNAI
-{
-    public:
-        void ReLU(float *vals, int len) {
-            for (int i = 0; i < len; i++) {
-                if (vals[i] < 0) {
-                    vals[i] = 0;
-                }
-            }
-        } //----- end of ReLU
-
-
-        vector<double> multiplyMatrix(const vector<double>& row, const vector<vector<double>>& matrix) {
-            const int M = matrix[0].size();
-            vector<double> result(M, 0.0);
-        
-            // Optimized multiplication
-            for (int i = 0; i < row.size(); ++i)
-            {
-                const double row_val = row[i];
-                for (int j = 0; j < M; ++j)
-                {
-                    result[j] += row_val * matrix[i][j];
-                }
-            }
-        
-            return result;
-        } //----- end of multiplyMatrix
-
-
-        void initLayer (float *layer_weight, float *layer_bias, int input_size, int layer_size) {
-            // Initialize the random number generator
-            srand(static_cast<unsigned int>(time(0)));
-        
-            // initialise weight array with random values
-            for (int i = 0; i < input_size * layer_size; i++) {
-                layer_weight[i] = static_cast<float>(rand()) / RAND_MAX * 0.2f - 0.1f; // Uniform distribution between -0.1 and 0.1;
-        
-                if (i < layer_size) {
-                    layer_bias[i] = 0; // Initialise biases to 0
-                }
-            }
-        } //----- end of initLayer
-
-
-        // Constructors and Destructors
-        NNAI () {
-
+    while(retry_count < max_retries) {
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        if(sock < 0) {
+            cout << "> Socket error (retry " << retry_count << "): " << strerror(errno) << endl;
+            continue;
         }
 
-        ~NNAI () {
+        // timeout configuration
+        timeval timeout{1, 0}; // 1 seconde
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
+        sockaddr_in serv_addr{};
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(12345);
+        inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+
+        if(connect(sock, (sockaddr*)&serv_addr, sizeof(serv_addr))) {
+            cout << "> Connect error (retry " << retry_count << "): " << strerror(errno) << endl;
+            close(sock);
+            retry_count++;
+            this_thread::sleep_for(10ms);
+            continue;
         }
 
-    protected:
-        vector<Layer> NN;
-};
+        string serialized;
+        try {
+            serialized = t.serialize();
+        } catch(const exception& e) {
+            cout << "> Serialization error: " << e.what() << endl;
+            close(sock);
+            return;
+        }
+
+        uint32_t msg_size = htonl(serialized.size());
+
+        // send transition size
+        ssize_t sent = send(sock, &msg_size, sizeof(msg_size), 0);
+        if(sent != sizeof(msg_size)) {
+            cout << "> Header send error: " << strerror(errno) << endl;
+            close(sock);
+            retry_count++;
+            continue;
+        }
+
+        // send transition
+        const char* data = serialized.data();
+        size_t total_sent = 0;
+        while(total_sent < serialized.size()) {
+            const ssize_t n = send(sock, data + total_sent, serialized.size() - total_sent, 0);
+            if(n <= 0) {
+                cout << "> Data send error: " << strerror(errno) << endl;
+                break;
+            }
+            total_sent += n;
+        }
+
+        if(total_sent == serialized.size()) {
+            cout << "> Transition successfully sent (" << serialized.size() << " bytes)" << endl;
+            close(sock);
+            return;
+        }
+
+        close(sock);
+        retry_count++;
+    }
+
+    cout << "> Failed to send transition after " << max_retries << " attempts" << endl;
+}  // ----- End of send_transition
 
 
-int main() {
+PlayersData snakeUpdate(const PlayersData &Players, const int &currentPlayer,
+                        const int &M, const int &round, const string &move)
+// Algorithm : Update the snake's position based on the chosen action
+{
+
+    PlayersData updatedPlayers = Players;
+
+    // --- Update snake based on chosen action ---
+    Coord currentHead = updatedPlayers[currentPlayer].first.front();
+    updatedPlayers[currentPlayer].first.emplace_front(currentHead.first + DIRECTIONS.at(move).first,
+                                                      currentHead.second + DIRECTIONS.at(move).second
+                                                     );
+
+    // --- Remove tail segments if it's not a growth round ---
+    if (round % M != 0)
+    {
+        updatedPlayers[currentPlayer].first.pop_back();
+    }
+
+    return updatedPlayers;
+}  // ----- End of snakeUpdate
+
+
+void optimiseMain() {
     int W, H, M, N, P, X, Y;
     cin >> W >> H;  // size of the board
     cin >> M;       // grow 1 block every M rounds
     cin >> N >> P;  // number of players and player's turn
 
-    cout << "> Received grid size: " << W << "x" << H << endl;
-    cout << "> Growth rate: every " << M << " turns" << endl;
-    cout << "> Number of players: " << N << " (I am player " << P << ")" << endl;
 
-    typedef pair<int, int> coord;
-
-    unordered_map<int, deque<coord>> Players;
+    // Store player nb (int), parts of their body (deque<coord> and data like
+    // the origin of the snake, the accessible space and their risk of being blocked
+    PlayersData Players;
     for (int i = 1; i <= N; i++) {
         cin >> X >> Y;
-        Players[i].push_front(make_pair(X, Y));
-        cout << "> Player " << i << " starts at (" << X << "," << Y << ")" << endl;
+        Players[i].first.emplace_front(X, Y);  // push the head of the player
+
+        // Initialise Player's data
+        Players[i].second.origin = make_pair(X, Y);  // origin of the player
+        Players[i].second.alive = true;
     }
 
-    map<string, coord> directions = {{"left", make_pair(-1, 0)}, {"right", make_pair(1, 0)},
-                                      {"up", make_pair(0, -1)}, {"down", make_pair(0, 1)}};
-
-    const string directionsCycle[] = {"right", "down", "left", "up"};
-    int dir_index = 0;
 
     // Game loop variables
+    string action;
+    int playerNb;
     string move;
-    string trash;
-    int moveLen;
     int round = 0;
+    int turn = 0;
+    int nbPlayerAlive = N;
+    string bestMove;
 
 
-    while (true) {
-        vector<bool> board(H * W * 4, false);  // 4 Canals for each case of the board
-        vector<float> inputs;
+    int boardChannels = 6; // 6 Channels for each case of the board
 
-        // Read and process moves from all previous players in the current round
-        for (int playerTurn = 1; playerTurn <= N; ++playerTurn)
+    // helper class
+    Utils helper(W, H, M, N, P, boardChannels);
+
+    Minimax survivor(W, H, M, N, P, boardChannels);
+
+    survivor.updateRewards(survivor.findClosestConfig("best_params.txt"));
+
+    while (nbPlayerAlive > 1 && Players[P].second.alive) {
+        // Read and process moves from all players in the current round
+        for (int playerTurn = 1; playerTurn <= N && nbPlayerAlive > 1 && Players[P].second.alive; playerTurn++)
         {
             if (playerTurn == P)
             {
-                // Determine and send current player's move
-                string chosenDir = directionsCycle[dir_index];
-                cout << "> Choosing direction: " << chosenDir << endl;
-                cout << chosenDir << endl;
-                dir_index = (dir_index + 1) % 4;
+                vector<float> playerBoardState = helper.computeBoardState(Players);
 
-                // Update current player's snake
-                coord currentHead = Players[P].front();
-                Players[P].push_front(make_pair(currentHead.first + directions[chosenDir].first,
-                                                currentHead.second + directions[chosenDir].second
-                                            ));
-            }
-            else 
-            {
-                cin >> trash >> moveLen >> move;
-                cout << "> Received playerTurn " << playerTurn << "'s move: " << move << endl;
+                // --- Select action using Minimax ---
+                unordered_map<string, float> mmScores = survivor.calculateMoveScores(playerBoardState, Players, turn);
 
-                // Update playerTurn's snake
-                coord currentHead = Players[playerTurn].front();
-                Players[playerTurn].push_front(make_pair(currentHead.first + directions[move].first,
-                                                    currentHead.second + directions[move].second
-                                                    ));
-            }
-
-            if (round % M != 0)
-            {
-                Players[playerTurn].pop_back();
-            }
-
-            for (int i = 0; i < Players[playerTurn].size(); i++)
-            {
-                cout << "> Player " << playerTurn <<"'s Snake part " << i << ": " << Players[playerTurn][i].first << ", " << Players[playerTurn][i].second << endl;
-            }
-        }
-
-        for (const auto& player : Players)
-        {
-            int playerNb = player.first;
-            const deque<coord>& snake = player.second;
-
-            inputMinMaxAvg playerToBot;
-            inputMinMaxAvg botToPlayer;
-            botToPlayer.min = playerToBot.min = sqrt(pow(W, 2) + pow(H, 2));
-            botToPlayer.avg = playerToBot.avg = botToPlayer.max = playerToBot.max = 0;
-
-            for (int i = 0; i < snake.size(); i++)
-            {
-                float x = snake[i].first;
-                float y = snake[i].second;
-                int index = (y * W + x) * 4; // 2D coords to index
-
-                if (playerNb == P)
+                // If no valid move, the snake will die so we need to train the network before killing it
+                if (mmScores.empty())
                 {
-                    if (i == 0)
-                    {
-                        board[index] = true; // Head of the bot's snake
-                    }
-                    else
-                    {
-                        board[index + 1] = true; // Body of the bot's snake
-                    }
+                    bestMove = "up";
+                    Players[P].second.alive = false;
+                    nbPlayerAlive--;
                 }
                 else
                 {
-                    float botHeadX = Players[P][0].first;
-                    float botHeadY = Players[P][0].second;
-                    float dist = sqrt(pow(abs(x-botHeadX), 2) + pow(abs(y-botHeadY), 2));
+                    // Select best combined move
+                    bestMove = max_element(mmScores.begin(), mmScores.end(),
+                    [](const pair<string, float> &a, const pair<string, float> &b) { return a.second < b.second; })->first;
+                }
 
-                    playerToBot.avg += dist;
+                Players = snakeUpdate(Players, P, M, round, bestMove);
 
-                    if (dist > playerToBot.max)
-                    {
-                        playerToBot.max = dist;
-                    }
+                cout << bestMove << endl;
+            }
+            else
+            {
+                // --- Process opponents' moves ---
+                cin >> action >> playerNb;
+                if (action == "move")
+                {
+                    cin >> move;
+                    Players = snakeUpdate(Players, playerNb+1, M, round, move);
 
-                    if (dist < playerToBot.min)
-                    {
-                        playerToBot.min = dist;
-                    }
+                }
+                else if (action == "death" && Players[playerNb+1].second.alive)
+                {
+                    cin >> action >> playerNb >> move;
 
-                    if (i == 0)
-                    {
-                        board[index + 2] = true; // Head of an opponent's snake
-
-                        for (int j = 0; j < snake.size(); j++)
-                        {
-                            float botX = Players[P][j].first;
-                            float botY = Players[P][j].second;
-                            dist = sqrt(pow(abs(x - botX), 2) + pow(abs(y - botY), 2));
-                            botToPlayer.avg += dist;
-
-                            if (dist > botToPlayer.max)
-                            {
-                                botToPlayer.max = dist;
-                            }
-
-                            if (dist < botToPlayer.min)
-                            {
-                                botToPlayer.min = dist;
-                            }
-                        }
-                        
-                        botToPlayer.avg /= snake.size();
-                    }
-                    else
-                    {
-                        board[index + 3] = true; // Body of an opponent's snake
-                    }
-
+                    Players[playerNb].second.alive = false;
+                    nbPlayerAlive--;
                 }
             }
 
-            if (playerNb != P)
-            {
-                playerToBot.avg /= snake.size();
-
-                inputs.push_back(playerToBot.min);
-                inputs.push_back(playerToBot.max);
-                inputs.push_back(playerToBot.avg);
-
-                inputs.push_back(botToPlayer.min);
-                inputs.push_back(botToPlayer.max);
-                inputs.push_back(botToPlayer.avg);
-            }
-
+            turn++;
         }
-
-        // Print the board for debugging
-        cout << "> Board state:" << endl;
-        for (int y = 0; y < H; ++y)
-        {
-            cout << "> ";
-            for (int x = 0; x < W; ++x)
-            {
-                int index = (y * W + x) * 4;
-                cout << "(" << board[index] << board[index + 1] << board[index + 2] << board[index + 3] << ") ";
-            }
-            cout << endl;
-        }
-
-        // Last Inputs : growth and snake size
-        inputs.push_back(M);
-        inputs.push_back(Players[1].size());
-
-        cout << "> ";
-        for (auto input : inputs)
-        {
-            cout << input << ", ";
-        }
-        cout << endl;
-
         round++;
-
-        cout << "> Snake Size: " << Players[1].size() << endl;
-        cout << "> round: " << round << endl;
 
         // Flush output buffer
         cout.flush();
     }
+}
 
+
+void trainingMain() {
+    int W, H, M, N, P, X, Y;
+    cin >> W >> H;  // size of the board
+    cin >> M;       // grow 1 block every M rounds
+    cin >> N >> P;  // number of players and player's turn
+
+
+    // Store player nb (int), parts of their body (deque<coord> and data like
+    // the origin of the snake, the accessible space and their risk of being blocked
+    PlayersData Players;
+    for (int i = 1; i <= N; i++) {
+        cin >> X >> Y;
+        Players[i].first.emplace_front(X, Y);  // push the head of the player
+
+        // Initialise Player's data
+        Players[i].second.origin = make_pair(X, Y);  // origin of the player
+        Players[i].second.alive = true;
+    }
+
+
+    // Game loop variables
+    string action;
+    int playerNb;
+    string move;
+    int round = 0;
+    int turn = 0;
+    int nbPlayerAlive = N;
+    string bestMove;
+
+    deque<string> last5Moves;
+    Transition transition;
+
+
+    int boardChannels = 6; // 6 Channels for each case of the board
+
+    // helper class
+    Utils helper(W, H, M, N, P, boardChannels);
+
+    // NN setup
+    // Input dimension:
+    const int CNN_OUTPUT_SIZE = 16;
+    const int EXTRA_FEATURES_SIZE = 6*(N-1) + 5 + 2*(N-1);
+    const int FC_INPUT_SIZE = CNN_OUTPUT_SIZE + EXTRA_FEATURES_SIZE;
+
+    // main and target network
+    NNAI mainNetwork(W, H, M, N, P, boardChannels, 0.1, 0.01, 0.995);
+
+    mainNetwork.aiCNN.addLayer("ReLU", 3, 1, 1, 8, boardChannels);
+    mainNetwork.aiCNN.addLayer("ReLU", 3, 1, 1, CNN_OUTPUT_SIZE);
+
+    mainNetwork.aiFCNN.addLayer("ReLU", 64, FC_INPUT_SIZE);
+    mainNetwork.aiFCNN.addLayer("ReLU", 32);
+    mainNetwork.aiFCNN.addLayer("", 4);  // output layer
+
+    // Minimax setup
+    Minimax survivor(W, H, M, N, P, boardChannels);
+
+    survivor.updateRewards(survivor.findClosestConfig("best_params.txt"));
+
+    // Merging setup
+    float lambda = 0.7;  // change to 0.0 to train miniMax, 1.0 for full DQN and 0.7 for basic use
+
+    // Training parameters
+    int batchSize = 64;
+    float learningRate = 0.01;  // start with 0.01 then 0.001 to increase precision
+    float gamma = 0.99;
+    int targetUpdateFreq = 1000;
+    int trainingStep = 0;
+
+
+    while (nbPlayerAlive > 1 && Players[P].second.alive) {
+        vector<float> currentBoardState = helper.computeBoardState(Players);
+        vector<float> currentExtraState = helper.computeExtraFeatures(currentBoardState, Players, {}, last5Moves, turn);
+        bool terminal = false;
+        bool oppDied = false;
+
+        // Read and process moves from all players in the current round
+        for (int playerTurn = 1; playerTurn <= N && nbPlayerAlive > 1 && Players[P].second.alive; playerTurn++)
+        {
+            if (playerTurn == P)
+            {
+                vector<float> playerBoardState = helper.computeBoardState(Players);
+                vector<float> playerExtraState = helper.computeExtraFeatures(playerBoardState, Players, {}, last5Moves, turn);
+
+
+                // --- Select action using DQN ---
+                vector<float> qValues = mainNetwork.forwardPropagation(playerBoardState, playerExtraState);
+
+                // --- Select action using Minimax ---
+                unordered_map<string, float> mmScores = survivor.calculateMoveScores(playerBoardState, Players, turn);
+
+
+                /// Combine scores with lambda weighting
+                map<string, float> combined;
+                for (const auto &[move, score] : mmScores) {
+                    int qIdx = distance(LABEL_ACTIONS.begin(), find_if(LABEL_ACTIONS.begin(), LABEL_ACTIONS.end(),
+                        [&move](const pair<int, string> &p) { return p.second == move; }));
+                    combined[move] = (1 - lambda) * score + lambda * qValues[qIdx];
+
+                    cout << "> MiniMax Score: " << score << " DQN Q-Value: " << qValues[qIdx] << " Combined: " << combined[move] << endl;
+                }
+
+                // If no valid move, the snake will die so we need to train the network before killing it
+                if (combined.empty())
+                {
+                    bestMove = "up";
+
+                    Players[P].second.alive = false;
+                    nbPlayerAlive--;
+                }
+                else
+                {
+                    // Select best combined move
+                    bestMove = max_element(combined.begin(), combined.end(),
+                    [](const pair<string, float> &a, const pair<string, float> &b) { return a.second < b.second; })->first;
+                }
+
+                last5Moves.push_front(bestMove);
+
+                if (last5Moves.size() > 5)
+                {
+                    last5Moves.pop_back();
+                }
+
+                Players = snakeUpdate(Players, P, M, round, bestMove);
+
+                // --- Compute next state ---
+                vector<float> nextBoardState = helper.computeBoardState(Players);
+
+                bool oppWillDie = true;
+                int nbOppKillSetup = 0;
+                unordered_map<int, vector<string>> playersValidMoves;
+                for (auto &player : Players)
+                {
+                    playersValidMoves[player.first] = helper.getValidMoves(nextBoardState, Players, player.first);
+                    if (playersValidMoves[player.first].size() <= 2)
+                    {
+                        nbOppKillSetup++;
+                    }
+
+                    if (player.first != P && oppWillDie && playersValidMoves[player.first].size() != 0)  // check if every other opponents will die next round
+                    {
+                        oppWillDie = false;
+                    }
+                }
+
+                vector<float> nextExtraState = helper.computeExtraFeatures(nextBoardState, Players,
+                    playersValidMoves, last5Moves, turn);
+
+                terminal = helper.checkTerminalState(nextBoardState, Players) || oppWillDie;
+
+                // --- Compute reward ---
+                float reward = mainNetwork.computeReward(nextBoardState, nextExtraState,
+                    currentExtraState, Players, P, turn, nbOppKillSetup,
+                        oppWillDie, false);
+
+                // --- Create transition ---
+                transition = mainNetwork.replayBuffer.createTransition(currentBoardState, currentExtraState,
+                                        nextBoardState, nextExtraState, bestMove, turn, Players, reward, terminal);
+
+                if (terminal)
+                {
+                    // avoid training on the first rounds
+                    if (round > 5)
+                    {
+                        cout << "> reward: " << transition.reward << endl;
+                        cout << "> done: " << transition.done << endl;
+
+                        // Send transition to the training server
+                        send_transition(transition);
+                    }
+
+                    Players[P].second.alive = false;
+                    nbPlayerAlive--;
+                }
+
+                cout << bestMove << endl;
+            }
+            else
+            {
+                // --- Process opponents' moves ---
+                cin >> action >> playerNb;
+                if (action == "move")
+                {
+                    cin >> move;
+                    Players = snakeUpdate(Players, playerNb+1, M, round, move);
+
+                }
+                else if (action == "death" && Players[playerNb+1].second.alive)
+                {
+                    cin >> action >> playerNb >> move;
+
+                    // Mark the specified player as dead
+                    Players[playerNb].second.alive = false;
+                    nbPlayerAlive--;
+                }
+            }
+
+            turn++;
+        }
+
+        if (!terminal && Players[P].second.alive)
+        {
+            vector<float> nextBoardState = helper.computeBoardState(Players);
+            vector<float> nextExtraState = helper.computeExtraFeatures(nextBoardState, Players, {},
+                                                                        last5Moves, turn);
+
+            int nbOppKillSetup = 0;
+            for (auto &player : Players)
+            {
+                int nbOppValidMoves = helper.getValidMoves(nextBoardState, Players, player.first).size();
+                if (nbOppValidMoves <= 2)
+                {
+                    nbOppKillSetup++;
+                }
+            }
+
+            // --- Compute reward ---
+            float reward = mainNetwork.computeReward(nextBoardState, nextExtraState, currentExtraState,
+                            Players, P, turn, nbOppKillSetup, false, oppDied);
+
+            transition = mainNetwork.replayBuffer.createTransition(currentBoardState, currentExtraState, nextBoardState,
+                                                                   nextExtraState, bestMove, turn, Players, reward, terminal);
+
+
+        }
+
+        if (!terminal)
+        {
+            if (round > 5)
+            {
+                cout << "> reward: " << transition.reward << endl;
+                cout << "> done: " << transition.done << endl;
+
+                send_transition(transition);
+            }
+        }
+
+        round++;
+
+        // Flush output buffer
+        cout.flush();
+    }
+}
+
+
+void gameMain() {
+    int W, H, M, N, P, X, Y;
+    cin >> W >> H;  // size of the board
+    cin >> M;       // grow 1 block every M rounds
+    cin >> N >> P;  // number of players and player's turn
+
+
+    // Store player nb (int), parts of their body (deque<coord> and data like
+    // the origin of the snake, the accessible space and their risk of being blocked
+    PlayersData Players;
+    for (int i = 1; i <= N; i++) {
+        cin >> X >> Y;
+        Players[i].first.emplace_front(X, Y);  // push the head of the player
+
+        // Initialise Player's data
+        Players[i].second.origin = make_pair(X, Y);  // origin of the player
+        Players[i].second.alive = true;
+    }
+
+
+    // Game loop variables
+    string action;
+    int playerNb;
+    string move;
+    int round = 0;
+    int turn = 0;
+    int nbPlayerAlive = N;
+    string bestMove;
+    deque<string> last5Moves;
+
+
+    int boardChannels = 6; // 6 Channels for each case of the board
+
+    // helper class
+    Utils helper(W, H, M, N, P, boardChannels);
+
+    // NN setup
+
+    // main and target network
+    NNAI mainNetwork(W, H, M, N, P, boardChannels, 0.1, 0.01, 0.995);
+    mainNetwork.loadModelFromFile("model.model");
+
+    // Minimax setup
+    Minimax survivor(W, H, M, N, P, boardChannels);
+
+    survivor.updateRewards(survivor.findClosestConfig("best_params.txt"));
+
+    // Merging setup
+    float lambda = 0.7;  // change to 0.0 to train miniMax, 1.0 for full DQN and 0.7 for basic use
+
+
+    while (nbPlayerAlive > 1 && Players[P].second.alive) {
+        // Read and process moves from all players in the current round
+        for (int playerTurn = 1; playerTurn <= N && nbPlayerAlive > 1 && Players[P].second.alive; playerTurn++)
+        {
+            if (playerTurn == P)
+            {
+                vector<float> playerBoardState = helper.computeBoardState(Players);
+                vector<float> playerExtraState = helper.computeExtraFeatures(playerBoardState, Players, {}, last5Moves, turn);
+
+
+                // --- Select action using DQN ---
+                vector<float> qValues = mainNetwork.forwardPropagation(playerBoardState, playerExtraState);
+
+                // --- Select action using Minimax ---
+                unordered_map<string, float> mmScores = survivor.calculateMoveScores(playerBoardState, Players, turn);
+
+                // Combine scores with lambda weighting
+                map<string, float> combined;
+                for (const auto &[move, score] : mmScores) {
+                    int qIdx = distance(LABEL_ACTIONS.begin(), find_if(LABEL_ACTIONS.begin(), LABEL_ACTIONS.end(),
+                        [&move](const pair<int, string> &p) { return p.second == move; }));
+                    combined[move] = (1 - lambda) * score + lambda * qValues[qIdx];
+                }
+
+                // If no valid move, the snake will die so we need to train the network before killing it
+                if (combined.empty())
+                {
+                    bestMove = "up";
+
+                    // Mark the player as dead as it will die next round
+                    Players[P].second.alive = false;
+                    nbPlayerAlive--;
+                }
+                else
+                {
+                    // Select best combined move
+                    bestMove = max_element(combined.begin(), combined.end(),
+                    [](const pair<string, float> &a, const pair<string, float> &b) { return a.second < b.second; })->first;
+                }
+
+                last5Moves.push_front(bestMove);
+
+                if (last5Moves.size() > 5)
+                {
+                    last5Moves.pop_back();
+                }
+
+                Players = snakeUpdate(Players, P, M, round, bestMove);
+
+                cout << bestMove << endl;
+            }
+            else
+            {
+                // --- Process opponents' moves ---
+                cin >> action >> playerNb;
+                if (action == "move")
+                {
+                    cin >> move;
+                    Players = snakeUpdate(Players, playerNb+1, M, round, move);
+
+                }
+                else if (action == "death" && Players[playerNb+1].second.alive)
+                {
+                    cin >> action >> playerNb >> move;
+
+                    // Mark the specified player as dead
+                    Players[playerNb].second.alive = false;
+                    nbPlayerAlive--;
+                }
+            }
+
+            turn++;
+        }
+        round++;
+
+        // Flush output buffer
+        cout.flush();
+    }
+}
+
+
+int main() {
+    gameMain();
     return 0;
 }
