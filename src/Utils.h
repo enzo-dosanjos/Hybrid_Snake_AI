@@ -32,13 +32,6 @@ static Coord computeNewCoord(const Coord &currentHead, const int &move)
         currentHead.y + DIRECTIONS[move].y
     };
 
-    printf("> Moving from (%d, %d) to (%d, %d) using move %d (%s)\n",
-        currentHead.x, currentHead.y,
-        newHead.x, newHead.y,
-        move,
-        ACTIONS[move].c_str()
-    );
-
     return newHead;
 }  // ----- End of computeNewCoord
 

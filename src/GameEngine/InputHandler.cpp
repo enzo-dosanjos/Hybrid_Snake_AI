@@ -61,7 +61,7 @@ int InputHandler::readMove()
 
     cin >> moveStr;
 
-    for (int i = 0; i < ACTIONS.size(); i++) {
+    for (size_t i = 0; i < ACTIONS.size(); i++) {
         if (ACTIONS[i] == moveStr) {
             move = i;
             break;

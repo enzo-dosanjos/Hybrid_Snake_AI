@@ -38,16 +38,28 @@ class GameEngine
             const int &currentPlayer,
             const Coord &newHead
         );
+        // Usage :
+        //
+        // Contract :
+        //
 
         std::vector<bool> updateActionMask(
             const int &currentPlayer,
-            const Coord &newHead
+            const Coord &head
         );
+        // Usage :
+        //
+        // Contract :
+        //
 
         Players updateStep(
             const int &currentPlayer,
             const int &move
         );
+        // Usage :
+        //
+        // Contract :
+        //
 
         bool isAlive(
             const int &playerNum,
@@ -57,6 +69,20 @@ class GameEngine
         //
         // Contract :
         //
+
+        bool willDieNextTurn(
+            const int &playerNum
+        ) const;
+        // Usage :
+        //
+        // Contract :
+        //
+
+
+        Players playerDied(
+            const int &playerNum
+        );
+
 
         bool isTerminalState();
         // Usage :
@@ -115,16 +141,17 @@ class GameEngine
             return players;
         }
 
+        std::vector<bool> getActionMask(const int &playerNum) const
+        {
+            return players.at(playerNum).playerInfo.actionMask;
+        }
+
 //---------------------------------------------- Constructors - destructor
         GameEngine(
             const GameConfig &p_config,
             const std::vector<Coord> &playersOrigins
         ) : config(p_config), round(0), turn(0), numPlayerAlive(p_config.N)
         {
-            for (int i = 1; i <= config.N; ++i)
-            {
-                printf("> Player %d origin: (%d, %d)\n", i, playersOrigins[i].x, playersOrigins[i].y);
-            }
             initPlayers(playersOrigins);
         }
 

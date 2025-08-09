@@ -33,6 +33,13 @@ Players GameEngine::initPlayers(const vector<Coord> &playersOrigins)
         players[i].playerInfo.actionMask = vector<bool>(ACTIONS.size(), true);  // All actions are valid at the start
     }
 
+    // Now that all players are initialized, set the initial action masks
+    for (int i = 1; i <= config.N; ++i)
+    {
+        Coord head = players[i].snake.front();
+        updateActionMask(i, head);
+    }
+
     return players;
 }
 
@@ -52,16 +59,16 @@ Players GameEngine::updateSnake(const int &currentPlayer, const Coord &newHead)
     return players;
 }  // ----- End of updateSnake
 
-vector<bool> GameEngine::updateActionMask(const int &currentPlayer, const Coord &newHead)
+vector<bool> GameEngine::updateActionMask(const int &currentPlayer, const Coord &head)
 // Algorithm : Update the action mask for the current player
 // The action mask indicates which actions are valid for the current player
 {
     vector<bool> &actionMask = players[currentPlayer].playerInfo.actionMask;
 
-    for (int i = 0; i < ACTIONS.size(); i++)
+    for (size_t i = 0; i < ACTIONS.size(); i++)
     {
-        // todo: compute new head for each action and check if it's valid
-        actionMask[i] = isAlive(currentPlayer);
+        Coord potentialNewHead = computeNewCoord(head, i);
+        actionMask[i] = isAlive(currentPlayer, potentialNewHead);
     }
 
     return actionMask;
@@ -70,14 +77,34 @@ vector<bool> GameEngine::updateActionMask(const int &currentPlayer, const Coord 
 Players GameEngine::updateStep(const int &currentPlayer, const int &move)
 // Algorithm : Update the game state. This method is called after each step
 {
+    if (!players[currentPlayer].playerInfo.alive)
+    {
+        // If the current player is already dead, no need to update
+        return players;
+    }
+
     // Compute the new head position based on the current move
     Coord currentHead = players[currentPlayer].snake.front();
     Coord newHead = computeNewCoord(currentHead, move);
 
     // Update players
     updateSnake(currentPlayer, newHead);
-    updateActionMask(currentPlayer, newHead);
-    players[currentPlayer].playerInfo.alive = isAlive(currentPlayer);
+
+    // Update action mask for all players
+    for (int i = 1; i <= config.N; ++i)
+    {
+        Coord head = players[i].snake.front();
+        updateActionMask(i, head);
+    }
+
+    if (currentPlayer == config.P)
+    {
+        // Check if the AI will die after this move
+        if (willDieNextTurn(currentPlayer))
+        {
+            playerDied(currentPlayer);
+        }
+    }
 
     // Update the round and turn counters
     turn++;
@@ -92,6 +119,17 @@ Players GameEngine::updateStep(const int &currentPlayer, const int &move)
     return players;
 }  // ----- End of updateStep
 
+Players GameEngine::playerDied(const int &playerNum)
+// Algorithm : Mark the player as dead and update the number of alive players
+{
+    if (players[playerNum].playerInfo.alive)
+    {
+        players[playerNum].playerInfo.alive = false;
+        numPlayerAlive--;
+    }
+
+    return players;
+}  // ----- End of playerDied
 
 bool GameEngine::isAlive(const int &playerNum, const Coord &head) const
 // Algorithm : Check if the player is alive by checking if the head of the snake
@@ -108,20 +146,20 @@ bool GameEngine::isAlive(const int &playerNum, const Coord &head) const
         currentHead = head;
     }
 
-    // check if the player is alive and the move is inbounds
-    if (players.at(playerNum).playerInfo.alive && isInbound(currentHead, config))
+    // check if the move is inbounds
+    if (isInbound(currentHead, config))
     {
         // Check if the head collides with any snake body part
-        for (const auto &player : players)
+        for (const auto &otherPlayer : players)
         {
-            int otherPlayerNum = player.first;
-            const PlayersData &otherPlayerData = player.second;
+            int otherPlayerNum = otherPlayer.first;
+            const PlayersData &otherPlayerData = otherPlayer.second;
 
             // Check each body part of the other player
             for (const Coord &bodyPart : otherPlayerData.snake)
             {
                 // Skip checking the head against itself
-                if (otherPlayerNum == playerNum && bodyPart == currentHead)
+                if (otherPlayerNum == playerNum && &bodyPart == &otherPlayerData.snake.front())
                 {
                     continue;
                 }
@@ -132,10 +170,28 @@ bool GameEngine::isAlive(const int &playerNum, const Coord &head) const
                 }
             }
         }
+
+        return true;  // No collision detected, player is alive
     }
 
-    return true;
+    return false;
 }  //----- End of isAlive
+
+bool GameEngine::willDieNextTurn(const int &playerNum) const
+// Algorithm : Check if the player will die in the next turn using the action mask
+{
+    bool willDie = true;
+    for (bool actionValid : players.at(playerNum).playerInfo.actionMask)
+    {
+        if (actionValid)
+        {
+            willDie = false;
+            break;
+        }
+    }
+
+    return willDie;
+}  // ----- End of willDieNextTurn
 
 bool GameEngine::isTerminalState()
 // Algorithm : Check if the game has reached a terminal state

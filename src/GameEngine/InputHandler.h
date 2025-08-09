@@ -32,9 +32,9 @@ class InputHandler {
 
         static int readMove();
 
-        void processDeathEvent();
+        static void processDeathEvent();
 
-        void writeMove(const int move);
+        static void writeMove(const int move);
 };
 
 

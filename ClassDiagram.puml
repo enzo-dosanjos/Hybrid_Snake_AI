@@ -200,12 +200,12 @@ package "GameEnginePackage" {
 
         + initPlayers(playersOrigins : vector<Coord>) : Players
         + updateSnake(currentPlayer : int, newHead : Coord) : Players
-        + updateActionMask(currentPlayer : int, newHead : Coord) : bitset<4>
+        + updateActionMask(currentPlayer : int, head : Coord) : bitset<4>
         + updateStep(currentPlayer : int, move : int) : Players
-        + isInbound(coord : Coord) : bool
         + isAlive(playerNum : int) : bool
+        + willDieNextTurn(playerNum : int) : bool
+        + playerDied(playerNum : int) : Players
         + isTerminalState() : bool
-        + computeNewCoord(currentHead : Coord, move : int) : Coord
     }
 
     class Observation {
@@ -243,6 +243,8 @@ package "GameEnginePackage" {
     class PlayerSelector {
         // public attributes
         - currentPlayer : int
+        - numPlayers : int
+        - playerTurn : int
 
         + nextPlayer() : int
         + myTurn() : bool
@@ -256,6 +258,12 @@ package "GameEnginePackage" {
         + processDeathEvent() : void
         + writeMove(move : int) : void
     }
+}
+
+class Utils {
+    + isInbound(coord : Coord) : bool
+    + computeOppositeDir(move: int) : int
+    + computeNewCoord(currentHead : Coord, move : int) : Coord
 }
 
 DQN --> ReplayBuffer

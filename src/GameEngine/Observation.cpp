@@ -167,7 +167,9 @@ const int &currentPlayer, const int &round)
     return board;
 }  // ----- End of updateBoard
 
-Coord Observation::findPrevSegment(const Coord& segment, const pair<int,int>& inds) const {
+Coord Observation::findPrevSegment(const Coord& segment, const pair<int,int>& inds) const
+// Algorithm : Find the previous position of a snake segment (head, body or tail)
+{
     for (int move = 0; move < static_cast<int>(ACTIONS.size()); ++move) {
         Coord neighbor = computeNewCoord(segment, move);
         if (!isInbound(neighbor, config)) {
@@ -187,4 +189,4 @@ Coord Observation::findPrevSegment(const Coord& segment, const pair<int,int>& in
     }
 
     return segment;
-}
+}  // ----- End of findPrevSegment

@@ -1,7 +1,7 @@
 # Compilation variables
 CXX = g++
 CXXFLAGS = -ansi -pedantic -Wall -std=c++17
-CXXFLAGS = -ansi -pedantic -Wall -std=c++17 -g -DMAP
+CXXFLAGS_DEBUG = -ansi -pedantic -Wall -std=c++17 -g -DMAP
 TARGET = AI
 BUILD_DIR := build
 
@@ -9,7 +9,7 @@ SOURCES = main.cpp \
 		  src/GameEngine/GameEngine.cpp src/GameEngine/InputHandler.cpp src/GameEngine/Observation.cpp src/GameEngine/PlayerSelector.cpp #src/GameEngine/StateAnalyzer.cpp
 OBJECTS = $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(SOURCES))
 
-all: $(TARGET)
+all: clean $(TARGET)
 
 debug: CXXFLAGS := $(CXXFLAGS_DEBUG)
 debug: clean $(TARGET)
