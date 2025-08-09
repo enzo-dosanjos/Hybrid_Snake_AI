@@ -20,9 +20,10 @@ CNN - A convolution neural network implementing a Q-learning agent
 
 //-------------------------------------------------------- Used interfaces
 #include "Structs.h"
+#include "Utils.h"
 
 //------------------------------------------------------------------ Types
-struct ConvolutionLayer {
+struct ConvolutionalLayer {
     std::string type;
     int inputChannels;
     int outputChannels;
@@ -59,8 +60,9 @@ class CNN
             int kernelSize,
             int stride,
             int padding,
-            int outputSize,
-            int inputSize = -1
+            int outputC,
+            std::pair<int, int> outputSize,
+            int inputC = -1
         );
         // Usage :
         //
@@ -76,14 +78,14 @@ class CNN
         //
 
         Matrix<std::vector<float>> forwardPropagation(
-            const std::vector<float> &input
+            const Matrix<std::vector<float>> &input
         );
         // Usage :
         //
         // Contract :
         //
 
-        std::vector<float> globalAvgPooling(
+        static std::vector<float> globalAvgPooling(
             const Matrix<std::vector<float>> &input
         );
         // Usage :
@@ -145,7 +147,7 @@ class CNN
     // Contract :
     //
 
-    std::vector<ConvolutionLayer> getNN() const
+    std::vector<ConvolutionalLayer> getNN() const
     {
         return cnn;
     }
@@ -163,51 +165,33 @@ class CNN
 //---------------------------------------------- Constructors - destructor
         CNN(
               int inputSize,
-              int w,
-              int h,
-              int m,
-              int n,
-              int p,
               int boardC
           ) : nnInputSize(inputSize),
-              W(w),
-              H(h),
-              M(m),
-              N(n),
-              P(p),
               boardChannels(boardC),
               gen(std::random_device{}())
         {
             #ifdef MAP
-                        cout << "Calling the constructor of cnn" << endl;
+                cout << "Calling the constructor of cnn" << endl;
             #endif
         }
 
 //-------------------------------------------------------------- PROTECTED
     protected:
         void initLayer(
-            ConvolutionLayer &layer
+            ConvolutionalLayer &layer
         );
         // Usage :
         //
         // Contract :
         //
 
-        Matrix<std::vector<float>> padInput(
+        static Matrix<std::vector<float>> padInput(
             const Matrix<std::vector<float>> &input,
-            ConvolutionLayer &layer
+            ConvolutionalLayer &layer
         );
-
-        Matrix<std::vector<float>> reshapeBoardState(
-            const std::vector<float> &flatBoardState
-        );
-        // Usage :
-        //
-        // Contract :
-        //
 
         void convolution (
-            ConvolutionLayer &layer,
+            ConvolutionalLayer &layer,
             const Matrix<std::vector<float>> &in = Matrix<std::vector<float>>()
         );
         // Usage :
@@ -225,10 +209,9 @@ class CNN
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        int W, H, M, N, P;
         int boardChannels;
 
-        std::vector<ConvolutionLayer> cnn;
+        std::vector<ConvolutionalLayer> cnn;
         int nnInputSize;
 
         std::mt19937 gen;

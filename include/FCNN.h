@@ -22,7 +22,7 @@ FCNN - A fully connected neural network implementing a Q-learning agent
 #include "Utils.h"
 
 //-------------------------------------------------------------- Constants
-std::map<int, std::string> LABEL_ACTIONS = {
+inline std::map<int, std::string> LABEL_ACTIONS = {
     {0, "left"},
     {1, "right"},
     {2, "up"},
@@ -53,7 +53,7 @@ class FCNN
 //--------------------------------------------------------- Public Methods
     public:
         void addLayer (
-            std::string type,
+            const std::string &type,
             int outputSize,
             int inputSize = -1
         );
@@ -85,8 +85,9 @@ class FCNN
         //
 
         void computeError (
-            const std::vector<float> targetOutput,
-            Transition &transition, float gamma
+            const std::vector<float> &targetOutput,
+            Transition &transition,
+            float gamma
         );
         // Usage :
         //
@@ -160,20 +161,9 @@ class FCNN
 //---------------------------------------------- Constructors - destructor
         FCNN (
             int inputSize,
-            int w,
-            int h,
-            int m,
-            int n,
-            int p,
             int boardC
         ) : nnInputSize(inputSize),
-            W(w),
-            H(h),
-            M(m),
-            N(n),
-            P(p),
             boardChannels(boardC),
-            helper(w, h, m, n, p, boardC),
             gen(std::random_device()())  // Initialize with a random seed
         {
             #ifdef MAP
@@ -200,7 +190,7 @@ class FCNN
         // Contract :
         //
 
-        std::vector<float> ReLU(
+        static std::vector<float> ReLU(
             const std::vector<float> &input
         );
         // Usage :
@@ -208,7 +198,7 @@ class FCNN
         // Contract :
         //
 
-        std::vector<float> multiplyMatrix(
+        static std::vector<float> multiplyMatrices(
             const std::vector<float> &row,
             const Matrix<float> &mat
         );
@@ -217,7 +207,7 @@ class FCNN
         // Contract :
         //
 
-        std::vector<float> addMatrix(
+        static std::vector<float> addMatrices(
             const std::vector<float> &row,
             const std::vector<float> &column
         );
@@ -228,14 +218,11 @@ class FCNN
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        int W, H, M, N, P;
         int boardChannels;
 
         // NN Components
         std::vector<FullyConnectedLayer> nn;
         int nnInputSize;
-
-        Utils helper;
 
         // random number generator for layer initialization
         std::mt19937 gen;

@@ -17,6 +17,7 @@ SpaceRiskAnalyzer - A spatial risk assessment system for grid-based games
 //------------------------------------------------------------------------
 
 //-------------------------------------------------------- Used interfaces
+#include "GameEngine.h"
 #include "Utils.h"
 #include "Structs.h"
 
@@ -26,7 +27,7 @@ class SpaceRiskAnalyzer
 //--------------------------------------------------------- Public Methods
     public:
         std::pair<std::pair<std::vector<float>, std::vector<float>>, Matrix<float>> analyzeState(
-            const PlayersData &playerState,
+            const Players &playerState,
             int currentPlayer
         );
         // Usage :
@@ -35,9 +36,7 @@ class SpaceRiskAnalyzer
         //
 
         Matrix<float> calculateRiskHeatmap(
-            const PlayersData &playerState,
-            const Matrix<bool> &occupied,
-            int currentPlayer
+            const int currentPlayer
         );
         // Usage :
         //
@@ -45,7 +44,7 @@ class SpaceRiskAnalyzer
         //
 
         std::pair<std::vector<float>, std::vector<float>> calculateAreas(
-            const PlayersData &playerState,
+            const Players &playerState,
             const Matrix<bool> &occupied,
             const Matrix<int> &heads
         );
@@ -55,7 +54,7 @@ class SpaceRiskAnalyzer
         //
 
         float calculateDirectionalRisk(
-            const std::vector<std::vector<float>> &heatmap,
+            const Matrix<float> &heatmap,
             Coord head
         );
         // Usage :
@@ -65,19 +64,15 @@ class SpaceRiskAnalyzer
 
 //---------------------------------------------- Constructors - destructor
     SpaceRiskAnalyzer(
-            int w,
-            int h,
-            int m,
-            int n,
-            int p,
-            int boardC,
+            const GameConfig &p_config,
+            const GameEngine &p_gameEngine,
             int lookahead = 5,
             float decay = 0.7
-    ) : W(w),
-        H(h),
+    ) : W(p_config.W),
+        H(p_config.H),
         maxLookahead(lookahead),
         decayFactor(decay),
-        helper(w, h, m, n, p, boardC)
+        gameEngine(p_gameEngine)
     {
         precomputeDecay();
     }
@@ -85,7 +80,7 @@ class SpaceRiskAnalyzer
 //-------------------------------------------------------------- PROTECTED
     protected:
         Matrix<std::unordered_map<int, int>> computeReachTiming(
-            const PlayersData &playerState,
+            const Players &playerState,
             const Matrix<bool> &occupied
         );
         // Usage :
@@ -103,7 +98,7 @@ class SpaceRiskAnalyzer
         //
 
         std::pair<Matrix<bool>, Matrix<int>> precomputeOccupancy(
-            const PlayersData &playerState
+            const Players &playerState
         );
         // Usage :
         //
@@ -125,11 +120,11 @@ class SpaceRiskAnalyzer
 
         // keep previous data to avoid recomputing the same data
         Matrix<std::unordered_map<int, int>> lastReachData;
-        PlayersData lastPlayerState;
+        Players lastPlayerState;
         Matrix<bool> lastOccupied;
         Matrix<int> lastHeads;
 
-        Utils helper;
+        GameEngine gameEngine;
 };
 
 

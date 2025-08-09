@@ -20,94 +20,30 @@ using namespace std;
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-bool Utils::isInbound(int x, int y)
-// Algorithm : Check if the coordinates are in the board's bounds
-{
-    return x >= 0 && x < config.W && y >= 0 && y < config.H;
-}  //----- End of isInbound
-
-
-bool Utils::checkDeath(const PlayersData &playerState, const vector<float> &boardState, int playerNb)
-// Algorithm : Check if the player is dead
-{
-    // todo: check for the moment when opponent's die face to face by checking if their body is next to their head (not a problem in 1v1)
-
-    Coord playerHead = playerState.at(playerNb).first.front();
-
-    // check if the move is inbounds
-    if (isInbound(playerHead.first, playerHead.second))
-    {
-        // Check if the cell is empty (no part of my body or no other player)
-        bool cellEmpty = true;
-        int ind = (playerHead.second * config.W + playerHead.first) * boardChannels;
-        for (int i = 0; i < boardChannels; i++)
-        {
-            if ((i != 0 || playerNb != config.P) && (i != 2 || playerNb == config.P))  // if playerNb is P, at i == 0 is
-                                                                                    // its head, same for opp and i == 2
-            {
-                if (boardState[ind + i] != 0.0)
-                {
-                    cellEmpty = false;
-                }
-            }
-        }
-
-        if (cellEmpty)
-        {
-            return false;
-        }
-    }
-
-    return true;
-}  //----- End of checkDeath
-
-
-bool Utils::checkTerminalState(vector<float> boardState, PlayersData playerState)
-// Algorithm : Check if the game is over
-{
-    int alivePlayersNb = 0;
-    bool playerAlive = false;  // check if my player is alive
-
-    for (const auto &player : playerState)
-    {
-        if (!checkDeath(playerState, boardState, player.first))
-        {
-            alivePlayersNb++;
-            if (player.first == config.P)
-            {
-                playerAlive = true;
-            }
-        }
-    }
-
-    return !playerAlive || alivePlayersNb <= 1;
-}  // ----- End of checkTerminalState
-
-
-vector<string> Utils::getValidMoves(const vector<float> &boardState, const PlayersData &playerState, int playerNb)
+vector<string> Utils::getValidMoves(const vector<float> &boardState, const Players &playerState, int playerNum)
 // Algorithm : Get the valid moves for the player
 {
     vector<string> validMoves;
 
     // skip dead players
-    if (!playerState.at(playerNb).second.alive)
+    if (!playerState.at(playerNum).playerInfo.alive)
     {
         return {};
     }
 
-    Coord currentHead = playerState.at(playerNb).first.front();
+    Coord currentHead = playerState.at(playerNum).snake.front();
     for (auto direction : DIRECTIONS)
     {
-        Coord newHead = make_pair(currentHead.first + direction.second.first,
-                        currentHead.second + direction.second.second
-                        );
+        Coord newHead = {currentHead.x + direction.second.x,
+                        currentHead.y + direction.second.y
+                        };
 
         // check if the move is inbounds
-        if (isInbound(newHead.first, newHead.second))
+        if (isInbound(newHead.x, newHead.y))
         {
             // Check if the cell is empty (no part of my body or no other player)
             bool cellEmpty = true;
-            int ind = (newHead.second * config.W + newHead.first) * boardChannels;
+            int ind = (newHead.y * config.W + newHead.x) * boardChannels;
 
             for (int i = 0; i < boardChannels; i++)
             {
@@ -128,72 +64,7 @@ vector<string> Utils::getValidMoves(const vector<float> &boardState, const Playe
     return validMoves;
 }  // ----- End of getValidMoves
 
-
-int Utils::getNextPlayer(int currentPlayer, const PlayersData &playerState)
-// Algorithm : Get the next player
-{
-    int next = (currentPlayer % config.N) + 1;
-    while (next != currentPlayer)
-    {
-        if (playerState.at(next).second.alive)
-        {
-            return next;
-        }
-        next = (next % config.N) + 1;
-    }
-
-    return -1; // Every other player are dead
-}  // ----- End of getNextPlayer
-
-
-vector<float> Utils::computeBoardState(const PlayersData &Players)
-// Algorithm : Compute the board state
-// board state is a flattened vector<float> with 6 channels per cell:
-// 0: my snake head, 1: my snake body, 2: opponent head, 3: opponent body
-// 4: x coordinate of the cell, 5: y coordinate of the cell
-{
-    vector<float> board(config.W * config.H * boardChannels, 0.0);
-
-    for (const auto &player : Players)
-    {
-        int playerNb = player.first;
-        const deque<Coord> &snake = player.second.first;
-
-        for (size_t i = 0; i < snake.size(); i++)
-        {
-            int x = snake[i].first;
-            int y = snake[i].second;
-            int ind = (y * config.W + x) * boardChannels;  // index of the cell at x, y
-
-            if (playerNb == config.P)
-            {
-                if (i == 0)
-                {
-                    board[ind] = 1.0;      // my snake head
-                }
-                else
-                {
-                    board[ind + 1] = 1.0;  // my snake body
-                }
-            }
-            else
-            {
-                if (i == 0)
-                {
-                    board[ind + 2] = 1.0;  // opponent head
-                }
-                else
-                {
-                    board[ind + 3] = 1.0;  // opponent body
-                }
-            }
-        }
-    }
-    return board;
-}  // ----- End of computeBoardState
-
-
-vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const PlayersData &playerState,
+vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const Players &playerState,
                     unordered_map<int, vector<string>> validMoves, const deque<string> &last5Moves, int turn)
 // Algorithm : Compute extra features for the DQN model
 // Features:
@@ -225,7 +96,7 @@ vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const 
     vector<float> killZoneScore;
     for (auto &player : playerState)
     {
-        if (player.second.second.alive)
+        if (player.second.playerInfo.alive)
         {
             nbAlivePlayers++;
         }
@@ -235,7 +106,7 @@ vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const 
             escapeRoutes.push_back(validMoves[player.first].size() / 4.0);  // Normalized 0-1
 
             // Kill Zone Proximity (0-1)
-            killZoneScore.push_back(calculateKillZoneProximity(player.second.first.front()));
+            killZoneScore.push_back(calculateKillZoneProximity(player.second.snake.front()));
         }
     }
 
@@ -250,8 +121,8 @@ vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const 
     InputMinMaxAvg playerToBot;
     InputMinMaxAvg botToPlayer;
 
-    Coord myHead = playerState.at(config.P).first.front();
-    int mySnakeSize = playerState.at(config.P).first.size();
+    Coord myHead = playerState.at(config.P).snake.front();
+    int mySnakeSize = playerState.at(config.P).snake.size();
 
     const float MAX_DISTANCE = sqrt(config.W * config.W + config.H * config.H);
 
@@ -259,7 +130,7 @@ vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const 
     {
         if (player.first != config.P)
         {
-            const deque<Coord> &snake = player.second.first;
+            const deque<Coord> &snake = player.second.snake;
 
             botToPlayer.min = playerToBot.min = sqrt(config.W * config.W + config.H * config.H);  // max distance allowed
                                                                                                   // by the board's size
@@ -267,10 +138,10 @@ vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const 
 
             for (size_t i = 0; i < snake.size(); i++)
             {
-                float x = snake[i].first;
-                float y = snake[i].second;
+                float x = snake[i].x;
+                float y = snake[i].y;
 
-                float dist = sqrt((x-myHead.first)*(x-myHead.first) + (y-myHead.second)*(y-myHead.second));
+                float dist = sqrt((x-myHead.x)*(x-myHead.x) + (y-myHead.y)*(y-myHead.y));
 
                 // Normalise every distances
                 dist /= MAX_DISTANCE;
@@ -286,8 +157,8 @@ vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const 
                 {
                     for (int j = 0; j < mySnakeSize; j++)
                     {
-                        float myX = playerState.at(config.P).first[j].first;
-                        float myY = playerState.at(config.P).first[j].second;
+                        float myX = playerState.at(config.P).snake[j].x;
+                        float myY = playerState.at(config.P).snake[j].y;
                         dist = sqrt((x - myX)*(x - myX) + (y - myY)*(y - myY));
 
                         // Normalise every distances
@@ -321,7 +192,7 @@ vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const 
     {
         (float)config.M/10.0f,  // normalise M between 0 and 1
         (float)(config.M - (currentRound % config.M))/(float)config.M,    // normalise between 0 and 1
-        (float)playerState.at(config.P).first.size() / (float)(config.W * config.H)  // normalise between 0 and 1
+        (float)playerState.at(config.P).snake.size() / (float)(config.W * config.H)  // normalise between 0 and 1
     });
 
 
@@ -342,7 +213,7 @@ vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const 
 }  // ----- End of computeExtraFeatures
 
 
-float Utils::calculateKillZoneProximity(Coord oppHead)
+float Utils::calculateKillZoneProximity(Coord oppHead) const
 // Algorithm : Calculate the proximity of a player to a kill zone (corners and walls)
 {
     // Calculate corner proximity
@@ -351,22 +222,22 @@ float Utils::calculateKillZoneProximity(Coord oppHead)
     const float quartH = config.H/4.0;
 
     // Check if in outer 25% of board edges
-    if(oppHead.first < quartW || oppHead.first > config.W - quartW)
+    if(oppHead.x < quartW || oppHead.x > config.W - quartW)
     {
         cornerWeight += 0.5;
     }
 
-    if(oppHead.second < quartH || oppHead.second > config.H - quartH)
+    if(oppHead.y < quartH || oppHead.y > config.H - quartH)
     {
         cornerWeight += 0.5;
     }
 
     // Calculate the minimum distance to any wall
     float wallDist = min({
-        (float)oppHead.first,
-        (float)(config.W-1 - oppHead.first),
-        (float)oppHead.second,
-        (float)(config.H-1 - oppHead.second)
+        (float)oppHead.x,
+        (float)(config.W-1 - oppHead.x),
+        (float)oppHead.y,
+        (float)(config.H-1 - oppHead.y)
     });
 
     // Normalize and invert (0 = at wall, 1 = center)
@@ -399,3 +270,26 @@ float Utils::calculateActionEntropy(const deque<string>& moves)
     }
     return entropy / 2.0;  // Max entropy for 4 moves = 2.0
 }  // ----- End of calculateActionEntropy
+
+
+Matrix<vector<float>> Utils::reshapeBoardState(const vector<float> &flatBoardState) const
+// Algorithm : Reshape the flat board state into a 3D matrix of the shape [channels][H][W]
+{
+    // Allocate the shaped board
+    Matrix<vector<float>> reshapedBoard(boardChannels, config.W, vector<float>(config.H, 0.0));
+
+    // Fill the shaped structure
+    for (int c = 0; c < boardChannels; c++)
+    {
+        for (int h = 0; h < config.H; h++)
+        {
+            for (int w = 0; w < config.W; w++)
+            {
+                int index = (h * config.W + w) * boardChannels + c;
+                reshapedBoard[c][h][w] = flatBoardState[index];
+            }
+        }
+    }
+
+    return reshapedBoard;
+}

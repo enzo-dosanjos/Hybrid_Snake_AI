@@ -1,0 +1,133 @@
+@startuml MCD
+
+package "AI" {
+    class CNN {
+        - boardChannels : int
+        - cnn : vector<ConvolutionalLayer>
+        - nnInputSize  : int
+        - gen : mt19937 // Random number generator
+        + addLayer(type : string, kernelSize : int, stride : int, padding : int, outputSize : int, inputSize : int) : void
+        + copyWeights(src : CNN) : void
+        + forwardPropagation(input : vector<float>) : vector<vector<vector<float>>>
+        + globalAvgPooling(input : vector<vector<vector<float>>>) : vector<float>
+        + resetGradients() : void
+        + spreadFCNNError(fcnnError : vector<float>) : void
+        + backPropagation() : void
+        + accumulateGradients() : void
+        + updateWeights(learningRate : float) : void
+        + gradientDescent(learningRate : float) : void
+        + initLayer(layer : ConvolutionalLayer) : void
+        + padInput(input : vector<vector<vector<float>>>, layer : ConvolutionalLayer) : vector<vector<vector<float>>>
+        + convolution(layer : ConvolutionalLayer, in : vector<vector<vector<float>>>) : void
+        + ReLU(input : float) : float
+    }
+
+    class FCNN {
+        - boardChannels : int
+        - nn : vector<FullyConnectedLayer>
+        - nnInputSize : int
+        - gen : mt19937 // Random number generator
+        + addLayer(type : string, inputSize : int, outputSize : int) : void
+        + copyWeights(src : FCNN) : void
+        + forwardPropagation(input : vector<float>) : vector<float>
+        + resetGradients() : void
+        + computeError(targetOutput : vector<float>, transition : Transition, gamma : float) : void
+        + backPropagation() : void
+        + accumulateGradients() : void
+        + updateWeights(learningRate : float) : void
+        + gradientDescent(learningRate : float) : void
+        + initLayer(layer : FullyConnectedLayer) : void
+        + computeLayer(layer : FullyConnectedLayer, in : vector<float>) : void
+        + ReLU(input : float) : float
+        + multiplyMatrices(row : vector<float>, mat : vector<vector<float>>) : vector<float>
+        + addMatrices(row : vector<float>, column : vector<float>) : vector<float>
+    }
+
+    class NNAI {
+    }
+
+    class ReplayBuffer {
+    }
+}
+
+package "Minimax" {
+    class Minimax {
+        - boardChannels : int
+        - params : MinimaxParams
+        - gameEngine : GameEngine
+        - analyzer : SpaceRiskAnalyzer
+        + calculateMoveScores(boardState : Matrix<vector<float>>, playerState : Players, turn : int) : unordered_map<string, float>
+        + simulateMove(move : string, boardState : Matrix<vector<float>>, playerState : Players, turn : int, playerNum : int) : pair<Matrix<vector<float>>, Players>
+        + evaluateState(playerState : Players, currentPlayer : int) : float
+        + minimax(boardState : Matrix<vector<float>>, playerState : Players, depth : int, alpha : float, beta : float, currentPlayer : int, turn : int) : pair
+    }
+
+    class SpaceRiskAnalyzer {
+        - W : int
+        - H : int
+        - maxLookAhead : int
+        - decayFactor : float
+        - decayTable : vector<float>
+        - lastReachData : vector<vector<unordered_map<int, int>>>
+        - lastPlayerState : Players
+        - lastOccupied : vector<vector<bool>>
+        - lastHeads : vector<vector<int>>
+        - gameEngine : GameEngine
+        + analyzeState(playerState : Players, currentPlayer : int) : pair<pair<vector<float>, vector<float>>, vector<vector<float>>>
+        + calculateRiskHeatmap(currentPlayer : int) : vector<vector<float>>
+        + calculateAreas(playerState : Players, occupied : vector<vector<bool>>, heads : vector<vector<int>>) : pair<vector<float>, vector<float>>
+        + calculateDirectionalRisk(heatmap : vector<vector<float>>, head : Coord) : float
+        + computeReachTiming(playerState : Players, occupied : vector<vector<bool>>) : vector<vector<unordered_map<int, int>>>
+        + precomputeCurrentPlayerTiming(timingGrid : vector<vector<unordered_map<int, int>>>, currentPlayer : int) : vector<vector<int>>
+        + precomputeOccupancy(playerState : Players) : pair<vector<vector<bool>>, vector<vector<int>>>
+        + precomputeDecay() : void
+    }
+}
+
+package "GameEnginePackage" {
+    class GameEngine {
+        - playerSelector : PlayerSelector
+        - observation : Observation
+        - config : GameConfig
+        - round : int
+        - turn : int
+        - numPlayerAlive : int
+        - players : Players
+        + snakeUpdate() : Players
+        + isBound(x : int, y : int) : bool
+        + checkDeath(playerState : Players, boardState : vector<float>, playerNum : int) : bool
+        + terminalState() : bool
+    }
+
+    class Observation {
+        - boardChannels : int
+        + getObservation() : vector<vector<float>>
+        + getPresenceObservationsInd() : pair<int, int>
+        + getPlayerHeadInd(playerNum : int) : int
+        + getPlayerTailInd(playerNum : int) : int
+        + getPlayerBodyInd(playerNum : int) : int
+    }
+
+    class PlayerSelector {
+        - currentPlayer : Player
+        + nextPlayer() : Player
+    }
+}
+
+class Utils {
+    - config : GameConfig
+    - boardChannels : int
+    + getValidMoves(boardState : Matrix<vector<float>>, playerState : Players, playerNum : int) : vector<string>
+    + computeExtraFeatures(boardState : Matrix<vector<float>>, playerState : Players, validMoves : unordered_map<int, vector<string>>, last5Moves : deque<string>, turn : int) : vector<float>
+    + calculateKillZoneProximity(oppHead : Coord) : float
+    + claculateActionEntropy(moves : deque<string>) : float
+    + reshapeBoardState(flatBoardState : vector<float>) : Matrix<vector<float>>
+}
+
+Minimax --|> SpaceRiskAnalyzer
+Minimax --|> GameEngine
+
+GameEngine --|> PlayerSelector
+GameEngine --|> Observation
+
+@enduml

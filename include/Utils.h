@@ -22,55 +22,10 @@ class Utils
 {
 //--------------------------------------------------------- Public Methods
     public:
-        bool isInbound(
-            int x,
-            int y
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        bool checkDeath(
-            const PlayersData &playerState,
-            const std::vector<float> &boardState,
-            int playerNb
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        bool checkTerminalState(
-            std::vector<float> boardState,
-            PlayersData playerState
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
         std::vector<std::string> getValidMoves(
-          const std::vector<float> &boardState,
-          const PlayersData &playerState,
-          int playerNb
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        int getNextPlayer(
-          int currentPlayer,
-          const PlayersData &playerState
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        std::vector<float> computeBoardState(
-          const PlayersData &Players
+          const std::vector<float> &boardState,  // todo: change
+          const Players &playerState,
+          int playerNum
         );
         // Usage :
         //
@@ -78,8 +33,8 @@ class Utils
         //
 
         std::vector<float> computeExtraFeatures(
-          const std::vector<float> boardState,
-          const PlayersData &playerState,
+          const std::vector<float> boardState,  // todo: change
+          const Players &playerState,
           std::unordered_map<int, std::vector<std::string>> validMoves,
           const std::deque<std::string> &last5Moves,
           int turn
@@ -90,16 +45,24 @@ class Utils
         //
 
         float calculateKillZoneProximity(
-          Coord opp_head
+          Coord oppHead
+        ) const;
+        // Usage :
+        //
+        // Contract :
+        //
+
+        static float calculateActionEntropy(
+          const std::deque<std::string>& moves
         );
         // Usage :
         //
         // Contract :
         //
 
-        float calculateActionEntropy(
-          const std::deque<std::string>& moves
-        );
+        Matrix<std::vector<float>> reshapeBoardState(
+                const std::vector<float> &flatBoardState
+            ) const;
         // Usage :
         //
         // Contract :
@@ -108,13 +71,9 @@ class Utils
 
 //---------------------------------------------- Constructors - destructor
         Utils(
-            int w,
-            int h,
-            int m,
-            int n,
-            int p,
+            const GameConfig &p_config,
             int boardChannels
-        ) : config({w, h, m, n, p}), boardChannels(boardChannels)
+        ) : config(p_config), boardChannels(boardChannels)
         // Usage :
         //
         // Contract :

@@ -1,26 +1,23 @@
-# Variables de compilation
+# Compilation variables
 CXX = g++
 CXXFLAGS = -ansi -pedantic -Wall -std=c++17
 TARGET = AI
-SOURCES = main.cpp Minimax.cpp SpaceRiskAnalyzer.cpp Utils.cpp
-OBJECTS = $(SOURCES:.cpp=.o)
-MAP ?= 0  # Pour activer ou désactiver la MAP, cleanall puis make avec l'option MAP=1 ou MAP=0 (0 par défaut).
+BUIL_DIR := build
+
+SOURCES = main.cpp CNN.cpp FCNN.cpp Minimax.cpp NNAI.cpp ReplayBuffer.cpp SpaceRiskAnalyzer.cpp Utils.cpp
+OBJECTS = $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(SOURCES))
 
 all: $(TARGET)
 
-# Compilation de l'exécutable
+# Compile the target executable
 $(TARGET): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJECTS)
 
-# Compilation de chaque fichier source en objet
-%.o: src/%.cpp include/%.h
-	$(CXX) $(CXXFLAGS) -c -g -DMAP=$(MAP) $<
+# Compile each source file into an object file
+$(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Nettoyage des fichiers objets
+# Clean up everything
 clean:
-	rm -f  *.o
-
-# Nettoyage des fichiers objets et de l'exécutable
-cleanall:
-	echo Nettoyage
-	rm -f $(TARGET) *.o
+	rm -rf $(BUILD_DIR) $(TARGET)

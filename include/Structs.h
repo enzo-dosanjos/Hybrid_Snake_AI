@@ -24,10 +24,23 @@ Structs  -  Contains all the structures, types and constants used in the
 
 
 //------------------------------------------------------------------ Types
-typedef std::pair<int, int> Coord;
+struct Coord {
+    int x;
+    int y;
+
+    bool operator==(const Coord &other) const {
+        return x == other.x && y == other.y;
+    }
+};
 
 template <typename T>
-using Matrix = std::vector<std::vector<T>>;
+class Matrix : public std::vector<std::vector<T>> {
+    public:
+        Matrix() = default;
+
+        Matrix(int width, int height, T defaultValue = T())
+            : std::vector<std::vector<T>>(height, std::vector<T>(width, defaultValue)) {}
+};
 
 
 // shared game structures
@@ -50,8 +63,12 @@ struct PlayersInfo {
     }
 };
 
+struct PlayersData {
+    std::deque<Coord> snake; // snake body parts
+    PlayersInfo playerInfo;
+};
 
-typedef std::unordered_map<int, std::pair<std::deque<Coord>, PlayersInfo>> PlayersData;
+typedef std::unordered_map<int, PlayersData> Players;
 
 
 struct InputMinMaxAvg {
@@ -63,10 +80,10 @@ struct InputMinMaxAvg {
 
 //-------------------------------------------------------------- Constants
 const std::map<std::string, Coord> DIRECTIONS = {
-    {"left", std::make_pair(-1, 0)},
-    {"right", std::make_pair(1, 0)},
-    {"up", std::make_pair(0, -1)},
-    {"down", std::make_pair(0, 1)}
+    {"left", Coord{-1, 0}},
+    {"right", Coord{1, 0}},
+    {"up", Coord{0, -1}},
+    {"down", Coord{0, 1}}
 };
 
 #endif //STRUCTS_H

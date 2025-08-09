@@ -103,9 +103,9 @@ class NNAI
         //
 
         float computeReward(
-            const vector<float> &boardState,
-            const vector<float> &extraState,
-            const vector<float> &prevExtraState,
+            const std::vector<float> &boardState,
+            const std::vector<float> &extraState,
+            const std::vector<float> &prevExtraState,
             const PlayersData &playerState,
             int myPlayer,
             int nbOppKillSetup,
@@ -207,25 +207,17 @@ class NNAI
 
 //---------------------------------------------- Constructors - destructor
         NNAI(
-              int w,
-              int h,
-              int m,
-              int n,
-              int p,
+              const GameConfig &p_config,
               int boardC,
               float eps = 1.0,
               float minEps = 0.01,
               float epsDecay = 0.995,
               int replayBufferSize = 100000
-          ) : W(w),
-              H(h),
-              M(m),
-              N(n),
-              P(p),
+          ) : config(p_config),
               boardChannels(boardC),
-              helper(w, h, m, n, p, boardC),
-              aiCNN(W * H * boardC, w, h, m, n, p, boardC),
-              aiFCNN(-1, w, h, m, n, p, boardC),  // the input size depends on the CNN output
+              helper(p_config, boardC),
+              aiCNN(p_config.W * p_config.H * boardC, boardC),
+              aiFCNN(-1, p_config, boardC),  // the input size depends on the CNN output
               replayBuffer(replayBufferSize),
               epsilon(eps),
               epsilonMin(minEps),
@@ -266,7 +258,7 @@ class NNAI
 
         void saveConvLayer(
             std::ofstream &file,
-            const ConvolutionLayer &layer
+            const ConvolutionalLayer &layer
         );
         // Usage :
         //
@@ -328,7 +320,7 @@ class NNAI
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        int W, H, M, N, P;
+        GameConfig config;  // todo: remove
         int boardChannels;
 
         Utils helper;

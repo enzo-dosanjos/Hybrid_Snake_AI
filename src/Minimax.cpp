@@ -12,7 +12,6 @@ Minimax - Implementation of a minimax algorithm with alpha-beta prunning
 #include <fstream>
 #include <sstream>
 #include <limits>
-#include <cmath>
 #include <algorithm>
 
 using namespace std;
@@ -23,14 +22,14 @@ using namespace std;
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
 unordered_map<string, float> Minimax::calculateMoveScores(vector<float> &boardState,
-                                                          PlayersData &playerState, int turn)
+                                                          Players &playerState, int turn)
 // Algorithm : Main method to calculate the move scores and return the best move.
 // It uses the minimax algorithm with alpha-beta prunning to reduce the search space.
 {
     unordered_map<string, float> moveScores;
 
     // Get valid moves for the current player
-    vector<string> validMoves = helper.getValidMoves(boardState, playerState, P);
+    vector<string> validMoves = helper.getValidMoves(boardState, playerState, config.P);  // todo: modify
 
     // Initialize alpha and beta values
     float alpha = -numeric_limits<float>::infinity();
@@ -39,19 +38,19 @@ unordered_map<string, float> Minimax::calculateMoveScores(vector<float> &boardSt
 
     for (const auto &move : validMoves) {
         // Simulate the move
-        auto simulatedState = simulateMove(move, boardState, playerState, turn, P);
-        int nextPlayer = helper.getNextPlayer(P, simulatedState.second);
+        auto simulatedState = simulateMove(move, boardState, playerState, turn, config.P);
+        int nextPlayer = helper.getNextPlayer(config.P, simulatedState.second);  // todo: modify
 
         float eval;
         if (nextPlayer == -1)
         {
             // if a terminal state is reached, evaluate the state
-            eval = evaluateState(simulatedState.second, P);
+            eval = evaluateState(simulatedState.second, config.P);
         }
         else
         {
             // else, run the minimax algorithm
-            eval = alphabeta(simulatedState.first, simulatedState.second, params.depth - 1, alpha, beta, nextPlayer, turn + 1);
+            eval = minimax(simulatedState.first, simulatedState.second, params.depth - 1, alpha, beta, nextPlayer, turn + 1);
         }
 
         // Update the best value, alpha and beta
@@ -66,229 +65,41 @@ unordered_map<string, float> Minimax::calculateMoveScores(vector<float> &boardSt
     return moveScores;
 }  // ----- End of calculateMoveScores
 
-
-void Minimax::updateRewards(const MinimaxParams &newParams)
-// Algorithm : Setter method to update the rewards and depth based on the new MinimaxParams parameters
-{
-    params = newParams;
-}  // ----- End of updateRewards
-
-
-void Minimax::updateRewards(float selfSpace, float oppSpace, float selfBlockRisk,
-                            float oppBlockRisk, float selfHeatRisk, float oppHeatRisk, float snakeLength, int depth)
-// Algorithm : Setter method to update the rewards and depth based on the new parameters values
-{
-    params.rewards.selfSpace = selfSpace;
-    params.rewards.oppSpace = oppSpace;
-    params.rewards.selfBlockRisk = selfBlockRisk;
-    params.rewards.oppBlockRisk = oppBlockRisk;
-    params.rewards.selfHeatRisk = selfHeatRisk;
-    params.rewards.oppHeatRisk = oppHeatRisk;
-    params.rewards.snakeLength = snakeLength;
-    params.depth = depth;
-}  // ----- End of updateRewards
-
-
-MinimaxParams Minimax::findClosestConfig(const string &filename)
-// Algorithm: Find the closest board configuration [W,H,M]
-{
-    MinimaxParams closestParams;
-    ifstream file(filename);
-    if (!file.is_open())
-    {
-        cerr << "> Error: parameters file not found!\n";
-        return closestParams;
-    }
-
-    string line;
-    double minDist= numeric_limits<double>::max();
-    string closestConfig;
-    streampos configPos = 0;
-
-    // Find all configurations and calculate distance
-    while (getline(file, line))
-    {
-        if (!line.empty() && line[0] == '[')
-        {
-            // Store position before reading this line
-            streampos currentPos = file.tellg();
-            currentPos -= (line.length() + 1); // Account for the line we just read
-
-        	// Parse [W,H,M] from line
-        	size_t start = line.find('[') + 1;
-        	size_t end = line.find(']');
-
-        	if (start != string::npos && end != string::npos)
-            {
-                string configStr = line.substr(start, end - start);
-        		stringstream ss(configStr);
-
-    	    	int w, h, m;
-    	    	char comma;
-    	    	ss >> w >> comma >> h >> comma >> m;
-
-    	    	// Calculate normalized Euclidean distance
-    	    	double distance = pow((W - w)/50.0, 2) +
-    	    	    			  pow((H - h)/50.0, 2) +
-    	    	    			  pow((M - m)/5.0, 2);
-
-    	    	if (distance < minDist)
-                {
-        		    minDist = distance;
-        		    closestConfig = line;
-                    configPos = currentPos;
-        		}
-            }
-        }
-    }
-
-    // Return the parameters for the closest configuration
-    if (!closestConfig.empty())
-    {
-        closestParams = loadParameters(closestConfig, file, configPos);
-    }
-
-    return closestParams;
-}  // ----- End of find_closest_config
-
-
 //-------------------------------------------------------------- PROTECTED
-MinimaxParams Minimax::loadParameters(const string &config, ifstream &file, streampos filePos)
-// Algorithm: Load parameters for the specified configuration based on player number
-{
-    MinimaxParams newParams;
-    string currentLine;
-    bool foundConfig = false;
-
-    // Clear any error flags and set file position
-    file.clear();
-
-    // Find the configuration block
-    if (filePos != 0) {
-        // If a position was provided, use it
-        file.seekg(filePos);
-        foundConfig = true;
-    } else {
-        // Otherwise search for the config from the beginning
-        file.seekg(0, std::ios::beg);
-
-        while (getline(file, currentLine))
-        {
-            if (currentLine == config) {
-                foundConfig = true;
-                break;
-            }
-        }
-    }
-
-    if (!foundConfig)
-    {
-        cout << "> Config " << config << " not found!\n";
-        return newParams;
-    }
-
-    // Read AI parameters
-    string aiPrefix = (P == 1) ? "AI1" : "AI2";
-    string depthPrefix = aiPrefix + "Depth=";
-
-    while (getline(file, currentLine))
-    {
-        if (!currentLine.empty() && currentLine[0] != '[')
-        {
-            // Parse parameters
-        	if (currentLine.find(aiPrefix + "{") != string::npos)
-            {
-        	    parseParameters(currentLine, newParams);
-        	}
-        	// Parse depth
-        	else if (currentLine.find(depthPrefix) != string::npos)
-                {
-        	    size_t pos = currentLine.find('=');
-        	    if (pos != string::npos)
-                {
-        	        try
-                    {
-        	            newParams.depth = stoi(currentLine.substr(pos + 1));
-        	        }
-                    catch (...)
-                    {
-        	            cout << "> Invalid depth format, using default depth=8\n";
-        	            newParams.depth = 8;
-        	        }
-        	    }
-        	}
-        }
-        else if (!currentLine.empty() && currentLine[0] == '[')
-        {
-            // reached the next configuration block
-            break;
-        }
-    }
-
-    return newParams;
-}  // ----- End of load_parameters
-
-
-void Minimax::parseParameters(const string& line, MinimaxParams& newParams)
-// Algorithm: Parse reward parameters from an AI{param1,param2,...} line
-{
-    size_t start = line.find('{') + 1;
-    size_t end = line.find('}');
-
-    if (start == string::npos || end == string::npos || start >= end)
-    {
-        cout << "> Invalid parameter format: " << line << endl;
-        return;
-    }
-
-    string paramStr = line.substr(start, end - start);
-    replace(paramStr.begin(), paramStr.end(), ',', ' ');
-
-    stringstream ss(paramStr);
-    ss >> newParams.rewards.selfSpace
-       >> newParams.rewards.oppSpace
-       >> newParams.rewards.selfBlockRisk
-       >> newParams.rewards.oppBlockRisk
-       >> newParams.rewards.selfHeatRisk
-       >> newParams.rewards.oppHeatRisk
-       >> newParams.rewards.snakeLength;
-}  // ----- End of parse_parameters
-
-
-pair<vector<float>, PlayersData> Minimax::simulateMove(const string &move, const vector<float> &boardState,
-                                                       const PlayersData &playerState, int turn, int playerNb)
+pair<vector<float>, Players> Minimax::simulateMove(const string &move, const vector<float> &boardState,  // todo:change boardState shape
+                                                       const Players &playerState, int turn, int playerNum)
 // Algorithm : Simulate the move of a player and update the board and player states.
 {
     // Make a copy of the current state
-    pair<vector<float>, PlayersData> newState;
+    pair<vector<float>, Players> newState;
     newState.first = boardState;
     newState.second = playerState;
 
 
     // Get current head and tail positions
-    Coord currentHead = newState.second[playerNb].first.front();
-    Coord currentTail = newState.second[playerNb].first.back();
+    Coord currentHead = newState.second[playerNum].snake.front();
+    Coord currentTail = newState.second[playerNum].snake.back();
 
     // create new head position from the move
-    Coord newHead = make_pair(currentHead.first + DIRECTIONS.at(move).first,
-                              currentHead.second + DIRECTIONS.at(move).second
-                             );
+    Coord newHead = {currentHead.x + DIRECTIONS.at(move).x,
+                     currentHead.y + DIRECTIONS.at(move).y
+    };
 
 
     // Update snake based on chosen move
-    newState.second[playerNb].first.push_front(newHead);
+    newState.second[playerNum].snake.push_front(newHead);
 
     // Count alive players after the move
     int alivePlayers = 0;
     for (const auto &player : newState.second)
     {
-        if (!helper.checkDeath(newState.second, newState.first, player.first))
+        if (!gameEngine.checkDeath(newState.second, newState.first, player.first))
         {
             alivePlayers++;
         }
         else
         {
-            newState.second[player.first].second.alive = false;
+            newState.second[player.first].playerInfo.alive = false;
         }
     }
 
@@ -296,17 +107,17 @@ pair<vector<float>, PlayersData> Minimax::simulateMove(const string &move, const
 
 
     // Remove tail segment if it's not a growth round from player states
-    if (currentRound % M != 0)
+    if (currentRound % config.M != 0)
     {
-        newState.second[playerNb].first.pop_back();
+        newState.second[playerNum].snake.pop_back();
     }
 
 
-    int ind = (currentHead.second * W + currentHead.first) * nbBoardChannels;  // current head
-    int newInd = (newHead.second * W + newHead.first) * nbBoardChannels;  // new head
+    int ind = (currentHead.y * config.W + currentHead.x) * boardChannels;  // current head
+    int newInd = (newHead.y * config.W + newHead.x) * boardChannels;  // new head
 
     // Make the current head become a body part and create the new head
-    if (playerNb == P)
+    if (playerNum == config.P)
     {
         if (newState.first[ind] == 1.0)
         {
@@ -316,9 +127,9 @@ pair<vector<float>, PlayersData> Minimax::simulateMove(const string &move, const
         newState.first[newInd] = 1.0;
 
         // remove tail segment if it's not a growth round from board state
-        if (currentRound % M != 0)
+        if (currentRound % config.M != 0)
         {
-            newState.first[(currentTail.second * W + currentTail.first) * nbBoardChannels + 1] = 0.0;
+            newState.first[(currentTail.y * config.W + currentTail.x) * boardChannels + 1] = 0.0;
         }
     }
     else
@@ -330,9 +141,9 @@ pair<vector<float>, PlayersData> Minimax::simulateMove(const string &move, const
         }
         newState.first[newInd + 2] = 1.0;
 
-        if (currentRound % M != 0)
+        if (currentRound % config.M != 0)
         {
-            newState.first[(currentTail.second * W + currentTail.first) * nbBoardChannels + 3] = 0.0;
+            newState.first[(currentTail.y * config.W + currentTail.x) * boardChannels + 3] = 0.0;
         }
     }
 
@@ -340,7 +151,7 @@ pair<vector<float>, PlayersData> Minimax::simulateMove(const string &move, const
 }  // ----- End of simulateMove
 
 
-float Minimax::evaluateState(const PlayersData &playerState, int currentPlayer)
+float Minimax::evaluateState(const Players &playerState, int currentPlayer)
 // Algorithm : Evaluate the state of the game and return a score based on the player's position and risk.
 {
     float score = 0.0;
@@ -351,10 +162,10 @@ float Minimax::evaluateState(const PlayersData &playerState, int currentPlayer)
     // Reachable space, blocking risk and heat risk
     float playerSpace = analysis.first.first[currentPlayer];
     float playerBlockRisk = analysis.first.second[currentPlayer];
-    float playerHeatRisk = analyzer.calculateDirectionalRisk(analysis.second, playerState.at(currentPlayer).first.front());
+    float playerHeatRisk = analyzer.calculateDirectionalRisk(analysis.second, playerState.at(currentPlayer).snake.front());
 
 
-    if (currentPlayer == P)
+    if (currentPlayer == config.P)
     {
         // Positive reward if gain of space or reduce blocking risk and negative if lose space and increase blocking risk
         score += playerSpace * params.rewards.selfSpace;
@@ -362,7 +173,7 @@ float Minimax::evaluateState(const PlayersData &playerState, int currentPlayer)
         score += playerHeatRisk * params.rewards.selfHeatRisk;
 
         // reward the player for surviving (the longer the player survives the bigger the reward)
-        score += playerState.at(P).first.size() * params.rewards.snakeLength;
+        score += playerState.at(config.P).snake.size() * params.rewards.snakeLength;
     }
     else
     {
@@ -375,25 +186,25 @@ float Minimax::evaluateState(const PlayersData &playerState, int currentPlayer)
 }  // ----- End of evaluateState
 
 
-float Minimax::alphabeta(const vector<float> &boardState, PlayersData playerState,
+float Minimax::minimax(const vector<float> &boardState, Players playerState,
                          int depth, float alpha, float beta, int currentPlayer, int turn)
 // Algorithm : Recursive miniMax with alpha-beta prunning to reduce the search space
 {
     // check if the depth is 0 or a terminal state is reached
-    if (depth == 0 || helper.checkTerminalState(boardState, playerState)) {
+    if (depth == 0 || gameEngine.terminalState()) {
         return evaluateState(playerState, currentPlayer);
     }
 
-    bool isMaximizing = (currentPlayer == P);  // check if the player of the node is the maximizing player
+    bool isMaximizing = (currentPlayer == config.P);  // check if the player of the node is the maximizing player
     float bestValue = (isMaximizing) ? -numeric_limits<float>::infinity() : numeric_limits<float>::infinity();
 
     // Get valid moves for the current player
-    vector<string> moves = helper.getValidMoves(boardState, playerState, currentPlayer);
+    vector<string> moves = helper.getValidMoves(boardState, playerState, currentPlayer);  // todo: modify
 
     for (const auto &move : moves) {
         // Simulate the move
         auto simulatedState = simulateMove(move, boardState, playerState, turn, currentPlayer);
-        int nextPlayer = helper.getNextPlayer(currentPlayer, simulatedState.second);
+        int nextPlayer = helper.getNextPlayer(currentPlayer, simulatedState.second);  // todo: modify
 
         float eval;
         if (nextPlayer == -1) {
@@ -401,7 +212,7 @@ float Minimax::alphabeta(const vector<float> &boardState, PlayersData playerStat
             eval = evaluateState(simulatedState.second, currentPlayer);
         } else {
             // else, run the minimax algorithm
-            eval = alphabeta(simulatedState.first, simulatedState.second,
+            eval = minimax(simulatedState.first, simulatedState.second,
                             depth - 1, alpha, beta, nextPlayer, turn + 1);
         }
 

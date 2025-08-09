@@ -18,7 +18,7 @@ using namespace std;
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-void FCNN::addLayer (string type, int outputSize, int inputSize)
+void FCNN::addLayer (const string &type, const int outputSize, const int inputSize)
 // Algorithm : Add a fully connected layer to the neural network by
 // initialising the type of the activation function, the input and output size
 {
@@ -93,7 +93,7 @@ void FCNN::resetGradients ()
 }  //----- End of resetGradients
 
 
-void FCNN::computeError (const vector<float> targetOutput, Transition &transition, float gamma)  // todo: implement n-step q-learning
+void FCNN::computeError (const vector<float> &targetOutput, Transition &transition, float gamma)  // todo: implement n-step q-learning
 // Algorithm : Compute the error of the output layer based on the target Q-value,
 // the highest value of the target output and the Bellman equation
 {
@@ -205,8 +205,8 @@ void FCNN::computeLayer (FullyConnectedLayer &layer, const vector<float> &in)
     vector<float> input = (layer.position == 0) ? in : nn[layer.position-1].output;
 
     // Matrix operation to get the output
-    layer.output = multiplyMatrix(input, layer.weights);
-    layer.output = addMatrix(layer.output, layer.biases);
+    layer.output = multiplyMatrices(input, layer.weights);
+    layer.output = addMatrices(layer.output, layer.biases);
 
     // activation functions
     if (layer.type == "ReLU")
@@ -220,7 +220,7 @@ void FCNN::backPropagation()
 // Algorithm : Compute the error of the layer by backpropagating the error
 // from the next layer
 {
-    for(auto it = nn.rbegin() + 1; it != nn.rend(); it++)
+    for(auto it = nn.rbegin() + 1; it != nn.rend(); ++it)
     {
         fill(it->error.begin(), it->error.end(), 0.0);
         for (int i = 0; i < it->outputSize; i++)
@@ -253,7 +253,7 @@ inline vector<float> FCNN::ReLU(const vector<float> &input)
 } //----- end of ReLU
 
 
-inline vector<float> FCNN::multiplyMatrix(const vector<float> &row, const Matrix<float> &mat)
+inline vector<float> FCNN::multiplyMatrices(const vector<float> &row, const Matrix<float> &mat)
 // Algorithm : Multiply a row vector by a matrix
 {
     const int resM = mat[0].size();
@@ -273,7 +273,7 @@ inline vector<float> FCNN::multiplyMatrix(const vector<float> &row, const Matrix
 } //----- end of multiplyMatrix
 
 
-inline vector<float> FCNN::addMatrix(const vector<float> &c1, const vector<float> &c2)
+inline vector<float> FCNN::addMatrices(const vector<float> &c1, const vector<float> &c2)
 // Algorithm : Add two vectors element-wise
 {
     const int resM = c2.size();

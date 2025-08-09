@@ -56,8 +56,11 @@ string NNAI::selectAction(const vector<float> &boardState, const vector<float> &
 vector<float> NNAI::forwardPropagation(const vector<float> &boardState, const vector<float> &extraState)
 // Algorithm : Forward propagation through the neural network (CNN + FCNN)
 {
+    // Reshape the board state to match the CNN input format
+    Matrix<vector<float>> reshapedBoardState = helper.reshapeBoardState(boardState);
+
     // Forward pass through CNN
-    Matrix<vector<float>> cnnOutput = aiCNN.forwardPropagation(boardState);
+    Matrix<vector<float>> cnnOutput = aiCNN.forwardPropagation(reshapedBoardState);
 
     // Global average pooling to get a flat vector
     vector<float> pooled = aiCNN.globalAvgPooling(cnnOutput);
@@ -625,7 +628,7 @@ void NNAI::saveLayer(ofstream &file, const FullyConnectedLayer &layer)
 }  //----- End of saveLayer
 
 
-void NNAI::saveConvLayer(ofstream &file, const ConvolutionLayer &layer)
+void NNAI::saveConvLayer(ofstream &file, const ConvolutionalLayer &layer)
 // Algorithm : Save the parameters of a convolutional layer to a file
 {
     // Save layer type
@@ -694,7 +697,7 @@ void NNAI::loadLayers(ifstream &file)
     aiFCNN.addLayer(layerType, outputSize, inputSize);
 
     // Load weights
-    Matrix<float> tmpWeights(inputSize, vector<float>(outputSize));
+    Matrix<float> tmpWeights(inputSize, outputSize);
     for(auto &row : tmpWeights) {
         for(float &w : row) {
             file.read(reinterpret_cast<char*>(&w), sizeof(w));
@@ -726,12 +729,24 @@ void NNAI::loadConvLayers(ifstream &file)
     file.read(reinterpret_cast<char*>(&outputChannels), sizeof(outputChannels));
     file.read(reinterpret_cast<char*>(&inputChannels), sizeof(inputChannels));
 
+    // Compute the output size with padding
+    pair<int, int> outputSize;
+    if (aiCNN.getNNSize() == 0)  // First layer
+    {
+        outputSize = {(config.H + 2*padding - kernelSize)/stride + 1, (config.W + 2*padding - kernelSize)/stride + 1};
+    }
+    else
+    {
+        outputSize = {(aiCNN.getNN().back().outputSize.first + 2*padding - kernelSize)/stride + 1,
+                         (aiCNN.getNN().back().outputSize.second + 2*padding - kernelSize)/stride + 1};
+    }
+
     // Add layer to network
-    aiCNN.addLayer(layerType, kernelSize, stride, padding, outputChannels, inputChannels);
+    aiCNN.addLayer(layerType, kernelSize, stride, padding, outputChannels, outputSize, inputChannels);
 
     // Load weights and biases
-    Matrix<Matrix<float>> tmpWeights(inputChannels, Matrix<vector<float>>(outputChannels,
-                                                    Matrix<float>(kernelSize, vector<float>(kernelSize, 0.0))));
+    Matrix<Matrix<float>> tmpWeights(inputChannels, outputChannels,
+        Matrix<float>(kernelSize, kernelSize, 0.0));
     vector<float> tmpBiases(outputChannels, 0.0);
     for(int ic = 0; ic < inputChannels; ic++) {
         for(int oc = 0; oc < outputChannels; oc++) {

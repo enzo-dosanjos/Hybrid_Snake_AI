@@ -17,17 +17,18 @@ using namespace std;
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-void CNN::addLayer (string type, int kernelSize, int stride, int padding, int outputC,  int inputC)
+void CNN::addLayer (string type, int kernelSize, int stride, const int padding, int outputC, pair<int, int> outputSize,  int inputC)
 // Algorithm : Add a convolutional layer to the neural network by
 // initialising the type of the activation function, the input and output size
 {
-    ConvolutionLayer layer;
+    ConvolutionalLayer layer;
 
     layer.type = type;
     layer.kernelSize = kernelSize;
     layer.stride = stride;
     layer.padding = padding;
     layer.outputChannels = outputC;
+    layer.outputSize = outputSize;
 
     // get the input size either from parameters or from the previous layer's output
     if (inputC == -1)
@@ -40,17 +41,6 @@ void CNN::addLayer (string type, int kernelSize, int stride, int padding, int ou
     }
 
     layer.position = cnn.size();
-
-    // Compute the output size with padding
-    if (cnn.empty())
-    {
-        layer.outputSize = {(H + 2*padding - kernelSize)/stride + 1, (W + 2*padding - kernelSize)/stride + 1};
-    }
-    else
-    {
-        layer.outputSize = {(cnn.back().outputSize.first + 2*padding - kernelSize)/stride + 1,
-                            (cnn.back().outputSize.second + 2*padding - kernelSize)/stride + 1};
-    }
 
     cnn.push_back(layer);
     initLayer(cnn.back());
@@ -69,16 +59,15 @@ void CNN::copyWeights (const CNN &src)
 }  //----- End of copyWeights
 
 
-Matrix<vector<float>> CNN::forwardPropagation(const vector<float> &input)
+Matrix<vector<float>> CNN::forwardPropagation(const Matrix<vector<float>> &input)
 // Algorithm : Compute the output of the neural network by propagating the input
 {
     for (auto &layer : cnn)
     {
         if (layer.position == 0)
         {
-            Matrix<vector<float>> reshapedBoard = reshapeBoardState(input);
             // The first layer directly receives the input
-            convolution(layer, reshapedBoard);
+            convolution(layer, input);
         }
         else
         {
@@ -146,7 +135,7 @@ void CNN::spreadFCNNError(const vector<float> &fcnnError)
 // Algorithm : Spread the FCNN error across the last layer's feature maps
 {
     // Distribute the error from the FCNN into the final CNN layer
-    ConvolutionLayer &lastLayer = cnn.back();
+    ConvolutionalLayer &lastLayer = cnn.back();
     int outChannels = lastLayer.outputChannels;
     int outH = lastLayer.outputSize.first;
     int outW = lastLayer.outputSize.second;
@@ -172,8 +161,8 @@ void CNN::backPropagation()
 {
     for (auto it = cnn.rbegin() + 1; it != cnn.rend(); ++it)
     {
-        ConvolutionLayer &current_layer = *it;
-        ConvolutionLayer &next_layer = cnn[it->position + 1];
+        ConvolutionalLayer &current_layer = *it;
+        ConvolutionalLayer &next_layer = cnn[it->position + 1];
 
         // Reset current layer's error to zero
         for (int oc = 0; oc < current_layer.outputChannels; oc++)
@@ -307,7 +296,7 @@ void CNN::updateWeights(float learning_rate)
 } //----- end of updateWeights
 
 
-void CNN::gradientDescent(float learning_rate)
+void CNN::gradientDescent(const float learning_rate)
 // Algorithm : Perform the gradient descent on the neural network
 {
     // Accumulate the gradients
@@ -320,7 +309,7 @@ void CNN::gradientDescent(float learning_rate)
 
 
 //-------------------------------------------------------------- PROTECTED
-void CNN::initLayer (ConvolutionLayer &layer)
+void CNN::initLayer (ConvolutionalLayer &layer)
 // Algorithm : Initialize the weights and biases of the layer
 {
     // Resize weights and biases matrices
@@ -337,10 +326,10 @@ void CNN::initLayer (ConvolutionLayer &layer)
     for (int i = 0; i < layer.inputChannels; i++)
     {
         layer.weights[i].resize(layer.outputChannels,
-                              Matrix<float>(layer.kernelSize, vector<float>(layer.kernelSize, 0.0)));
+                              Matrix<float>(layer.kernelSize, layer.kernelSize, 0.0));
 
         layer.weightGradient[i].resize(layer.outputChannels,
-                                       Matrix<float>(layer.kernelSize, vector<float>(layer.kernelSize, 0.0)));
+                                       Matrix<float>(layer.kernelSize, layer.kernelSize, 0.0));
 
         for (int j = 0; j < layer.outputChannels; j++)
         {
@@ -356,45 +345,20 @@ void CNN::initLayer (ConvolutionLayer &layer)
 
     // Resize and initialise error, output
     layer.error.resize(layer.outputChannels,
-                       Matrix<float>(layer.outputSize.first, vector<float>(layer.outputSize.second, 0.0)));
+                       Matrix<float>(layer.outputSize.first, layer.outputSize.second, 0.0));
     layer.output.resize(layer.outputChannels,
-                        Matrix<float>(layer.outputSize.first, vector<float>(layer.outputSize.second, 0.0)));
+                        Matrix<float>(layer.outputSize.first, layer.outputSize.second, 0.0));
 
 } //----- end of initLayer
 
 
-Matrix<vector<float>> CNN::reshapeBoardState(const vector<float> &flatBoardState)
-// Algorithm : Reshape the flat board state into a 3D matrix of the shape [channels][H][W]
-{
-    // Allocate the shaped board
-    Matrix<vector<float>> shapedBoard(boardChannels, Matrix<float>(H, vector<float>(W, 0.0)));
-
-    // Fill the shaped structure
-    for (int c = 0; c < boardChannels; c++)
-    {
-        for (int h = 0; h < H; h++)
-        {
-            for (int w = 0; w < W; w++)
-            {
-                int index = (h * W + w) * boardChannels + c;
-                shapedBoard[c][h][w] = flatBoardState[index];
-            }
-        }
-    }
-
-    return shapedBoard;
-}
-
-
-Matrix<vector<float>> CNN::padInput(const Matrix<vector<float>> &input, ConvolutionLayer &layer)
+Matrix<vector<float>> CNN::padInput(const Matrix<vector<float>> &input, ConvolutionalLayer &layer)
 // Algorithm : Add padding to the input
 {
-    int inputH = (layer.position == 0) ? H : cnn[layer.position-1].outputSize.first;
-    int inputW = (layer.position == 0) ? W : cnn[layer.position-1].outputSize.second;
+    int inputH = input.empty() ? 0 : input[0].size();
+    int inputW = (inputH == 0) ? 0 : input[0][0].size();
 
-    Matrix<vector<float>> paddedInput(input.size(),
-                                         vector<vector<float>>(inputH + 2*layer.padding,
-                                                               vector<float>(inputW + 2*layer.padding, 0.0f)));
+    Matrix<vector<float>> paddedInput(input.size(), inputH + 2*layer.padding, vector<float>(inputW + 2*layer.padding, 0.0f));
 
     for(int c = 0; c < input.size(); c++)
     {
@@ -411,7 +375,7 @@ Matrix<vector<float>> CNN::padInput(const Matrix<vector<float>> &input, Convolut
 }
 
 
-void CNN::convolution (ConvolutionLayer &layer, const Matrix<vector<float>> &in)
+void CNN::convolution (ConvolutionalLayer &layer, const Matrix<vector<float>> &in)
 // Algorithm : Compute the output of the layer by convolution
 {
     Matrix<vector<float>> input = (layer.position == 0) ? in : cnn[layer.position-1].output;
