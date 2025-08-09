@@ -57,9 +57,9 @@ int InputHandler::readMove()
 // Algorithm : Read the move from the input
 {
     string moveStr;
-    int move;
+    int move = -1;
 
-    cin >> move;
+    cin >> moveStr;
 
     for (int i = 0; i < ACTIONS.size(); i++) {
         if (ACTIONS[i] == moveStr) {

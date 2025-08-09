@@ -15,7 +15,7 @@ import re
 import sys
 
 # Default Timeouts :
-TIMEOUT_LENGTH = 1  # sec
+TIMEOUT_LENGTH = 2  # sec
 DISCORD_TIMEOUT = 60  # sec
 
 WIDTH = 10

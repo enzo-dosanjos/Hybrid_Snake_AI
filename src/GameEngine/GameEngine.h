@@ -15,6 +15,7 @@ GameEngine - Handles the game logic and operations
 
 //-------------------------------------------------------- Used interfaces
 #include "../Structs.h"
+#include "../Utils.h"
 
 //-------------------------------------------------------------- Constants
 
@@ -47,14 +48,6 @@ class GameEngine
             const int &currentPlayer,
             const int &move
         );
-
-        bool isInbound(
-            Coord coord
-        ) const;
-        // Usage :
-        //
-        // Contract :
-        //
 
         bool isAlive(
             const int &playerNum,
@@ -117,7 +110,7 @@ class GameEngine
             return numPlayerAlive;
         }
 
-        Players getPlayers() const
+        Players &getPlayers()
         {
             return players;
         }
@@ -128,23 +121,16 @@ class GameEngine
             const std::vector<Coord> &playersOrigins
         ) : config(p_config), round(0), turn(0), numPlayerAlive(p_config.N)
         {
+            for (int i = 1; i <= config.N; ++i)
+            {
+                printf("> Player %d origin: (%d, %d)\n", i, playersOrigins[i].x, playersOrigins[i].y);
+            }
             initPlayers(playersOrigins);
         }
 
         ~GameEngine()
         {
         }
-
-//-------------------------------------------------------------- PROTECTED
-    protected:
-        static Coord computeNewCoord(
-            const Coord &currentHead,
-            const int &move
-        );
-        // Usage :
-        //
-        // Contract :
-        // Computes the new coordinates of the snake's head based on the current head and the move
 
 //---------------------------------------------------------------- PRIVATE
     private:

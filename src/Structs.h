@@ -73,15 +73,15 @@ typedef std::unordered_map<int, PlayersData> Players;
 //-------------------------------------------------------------- Constants
 constexpr std::array<Coord, 4> DIRECTIONS = {
     Coord{-1, 0},  // left
-    Coord{1, 0},  // right
     Coord{0, -1},  // up
+    Coord{1, 0},  // right
     Coord{0, 1}  // down
 };
 
 const std::array<std::string, 4> ACTIONS = {
     "left",
-    "right",
     "up",
+    "right",
     "down"
 };
 

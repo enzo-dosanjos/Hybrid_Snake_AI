@@ -24,17 +24,10 @@ int main() {
     GameConfig gameConfig = io.readGameConfig();
     vector<Coord> playersOrigins = io.readPlayersOrigins(gameConfig.N);
 
-    printf("> Game Config: W=%d, H=%d, M=%d, N=%d, P=%d\n",
-        gameConfig.W, gameConfig.H, gameConfig.M, gameConfig.N, gameConfig.P);
-    printf("> Players Origins:\n");
-    for (int i = 1; i <= gameConfig.N; ++i) {
-        printf(">  Player %d: (%d, %d)\n", i, playersOrigins[i].x, playersOrigins[i].y);
-    }
-
     // Initialize game engine
     GameEngine gameEngine(gameConfig, playersOrigins);
 
-    PlayerSelector playerSelector(gameConfig.P);
+    PlayerSelector playerSelector(gameConfig.N, gameConfig.P);
 
     // Initialize observation
     int boardChannels = 9; // 9 Channels for each observation in each cell
@@ -42,42 +35,52 @@ int main() {
 
     for (int i = 0; i < 8; ++i) {
         Matrix<vector<float>> a = observation.getObservation();
-        cout << ">[\n";
-        for (size_t i = 0; i < a.size(); ++i) {
-            cout << ">  [\n";
-            for (size_t j = 0; j < a[i].size(); ++j) {
-                cout << ">    [";
-                for (size_t k = 0; k < a[i][j].size(); ++k) {
-                    cout << a[i][j][k];
-                    if (k + 1 < a[i][j].size()) cout << ", ";
+
+        for (size_t x = 0; x < gameConfig.W; ++x) {
+            cout << "> [";
+            for (size_t y = 0; y < gameConfig.H; ++y) {
+                cout << "[";
+                const auto& channels = a[y][x];
+                for (size_t k = 0; k < channels.size(); ++k) {
+                    cout << channels[k];
+                    if (k + 1 < channels.size()) cout << ", ";
                 }
                 cout << "]";
-                if (j + 1 < a[i].size()) cout << ",";
-                cout << "\n";
+                if (y + 1 < gameConfig.H) cout << ", ";
             }
-            cout << ">  ]";
-            if (i + 1 < a.size()) cout << ",";
+            cout << "]\n";
+        }
+
+        int move = 2;
+        int player = playerSelector.getCurrentPlayer();
+        gameEngine.updateStep(player, move);
+        // display players
+        for (int p = 1; p <= gameConfig.N; ++p) {
+            const auto &snake = gameEngine.getPlayers().at(p).snake;
+            cout << "> Player " << p << " snake: ";
+            for (const auto &part : snake) {
+                cout << "(" << part.x << ", " << part.y << ") ";
+            }
             cout << "\n";
         }
-        cout << ">]\n";
-
-        printf("> hello\n");
-        int move = 1;
-        Coord prevHead = gameEngine.getPlayers().at(0).snake.front();
-        printf("> hello\n");
-        gameEngine.updateStep(0, move);
-        printf("> hello\n");
-        observation.updateBoard(gameEngine.getPlayers(), 0, prevHead, i);
-        printf("> hello\n");
+        observation.updateBoard(gameEngine.getPlayers(), player, i);
         io.writeMove(move);
 
+        playerSelector.nextPlayer(gameEngine.getPlayers());
+        player = playerSelector.getCurrentPlayer();
+
+        pair<string, int> action = io.readAction();
+        if (action.first == "death") {
+            io.processDeathEvent();
+            break;
+        }
         int oppMove = io.readMove();
-        printf("> hello\n");
-        Coord oppPrevHead = gameEngine.getPlayers().at(0).snake.front();
-        printf("> hello\n");
-        gameEngine.updateStep(1, oppMove);
-        printf("> hello\n");
-        observation.updateBoard(gameEngine.getPlayers(), 1, oppPrevHead, i);
+        gameEngine.updateStep(player, oppMove);
+        observation.updateBoard(gameEngine.getPlayers(), player, i);
+        playerSelector.nextPlayer(gameEngine.getPlayers());
+
+        // Flush output buffer
+        cout.flush();
     }
     return 0;
 }

@@ -83,7 +83,7 @@ Players GameEngine::updateStep(const int &currentPlayer, const int &move)
     turn++;
 
     // If we reached the last player, increment the round and reset the turn
-    if (turn == config.N - 1)
+    if (turn == config.N)
     {
         round++;
         turn = 0;
@@ -91,25 +91,6 @@ Players GameEngine::updateStep(const int &currentPlayer, const int &move)
 
     return players;
 }  // ----- End of updateStep
-
-Coord GameEngine::computeNewCoord(const Coord &currentHead, const int &move)
-// Algorithm : Computes the new coordinates of the snake's head based on the current head and the
-// move
-{
-    Coord newHead = {
-        currentHead.x + DIRECTIONS[move].x,
-        currentHead.y + DIRECTIONS[move].y
-    };
-
-    return newHead;
-}  //----- End of computeNewCoord
-
-bool GameEngine::isInbound(Coord coord) const
-// Algorithm : Check if the coordinates are in the board's bounds
-{
-    return coord.x >= 0 && coord.x < config.W &&
-        coord.y >= 0 && coord.y < config.H;
-}  //----- End of isInbound
 
 
 bool GameEngine::isAlive(const int &playerNum, const Coord &head) const
@@ -128,7 +109,7 @@ bool GameEngine::isAlive(const int &playerNum, const Coord &head) const
     }
 
     // check if the player is alive and the move is inbounds
-    if (players.at(playerNum).playerInfo.alive && isInbound(currentHead))
+    if (players.at(playerNum).playerInfo.alive && isInbound(currentHead, config))
     {
         // Check if the head collides with any snake body part
         for (const auto &player : players)

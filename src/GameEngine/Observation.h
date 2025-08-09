@@ -17,8 +17,8 @@ Observation - Manages the board representation of the game
 //------------------------------------------------------------------------
 
 //-------------------------------------------------------- Used interfaces
-#include "GameEngine.h"
 #include "../Structs.h"
+#include "../Utils.h"
 
 //-------------------------------------------------------------- Constants
 
@@ -45,8 +45,7 @@ class Observation {
         Matrix<std::vector<float>> updateBoard(
             const Players &playerState,
             const int &currentPlayer,
-            const Coord &newHead,
-            const int round
+            const int &round
         );
 
         static std::pair<int, int> getPresenceObservationsInd()
@@ -111,6 +110,13 @@ class Observation {
 
             initBoard(playersOrigins);
         }
+
+//--------------------------------------------------------------- PROTECTED
+    protected:
+        Coord findPrevSegment(
+            const Coord& segment,
+            const std::pair<int, int>& inds
+        ) const;
 
 //---------------------------------------------------------------- PRIVATE
     private:

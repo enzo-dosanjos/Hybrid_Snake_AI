@@ -26,7 +26,6 @@ class PlayerSelector
 //--------------------------------------------------------- Public Methods
     public:
         int nextPlayer(
-            int numPlayers,
             const Players &playerState
         );
         // Usage :
@@ -50,8 +49,8 @@ class PlayerSelector
         }
 
 //---------------------------------------------- Constructors - destructor
-        PlayerSelector(const int p_playerTurn
-        ) : currentPlayer(1), playerTurn(p_playerTurn)
+        PlayerSelector(const int p_numPlayers, const int p_playerTurn
+        ) : numPlayers(p_numPlayers), currentPlayer(1), playerTurn(p_playerTurn)
         {
             #ifdef MAP
                 std::cout << "Calling the constructor of PlayerSelector" << std::endl;
@@ -62,6 +61,7 @@ class PlayerSelector
 
 //---------------------------------------------------------------- PRIVATE
     private:
+        int numPlayers;
         int currentPlayer;
         int playerTurn;
 };

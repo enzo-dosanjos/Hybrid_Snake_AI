@@ -215,7 +215,8 @@ package "GameEnginePackage" {
 
         + getObservation() : vector<vector<vector<float>>>
         + initBoard(playersOrigins : vector<Coord>) : vector<vector<vector<float>>>
-        + updateBoard(playerState : PlayersData, currentPlayer : int, prevHead : Coord, round : int) : vector<vector<vector<float>>>
+        + updateBoard(playerState : PlayersData, currentPlayer : int, round : int) : vector<vector<vector<float>>>
+        + findPrevSegment(segment : Coord, inds : pair<int, int>) : Coord
         + getPresenceObservationsInd() : pair<int, int>
         + getPlayerHeadInd(playerNum : int) : pair<int, int>
         + getPlayerTailInd(playerNum : int) : pair<int, int>

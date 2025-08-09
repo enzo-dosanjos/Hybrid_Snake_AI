@@ -17,7 +17,7 @@ using namespace std;
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-int PlayerSelector::nextPlayer(int numPlayers, const Players &playerState)
+int PlayerSelector::nextPlayer(const Players &playerState)
 // Algorithm : Update the current player to the next alive player
 {
     do {

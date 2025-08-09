@@ -1,6 +1,7 @@
 # Compilation variables
 CXX = g++
 CXXFLAGS = -ansi -pedantic -Wall -std=c++17
+CXXFLAGS = -ansi -pedantic -Wall -std=c++17 -g -DMAP
 TARGET = AI
 BUILD_DIR := build
 
@@ -9,6 +10,9 @@ SOURCES = main.cpp \
 OBJECTS = $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(SOURCES))
 
 all: $(TARGET)
+
+debug: CXXFLAGS := $(CXXFLAGS_DEBUG)
+debug: clean $(TARGET)
 
 # Compile the target executable
 $(TARGET): $(OBJECTS)
