@@ -15,7 +15,6 @@ GameEngine - Handles the game logic and operations
 
 //-------------------------------------------------------- Used interfaces
 #include "../Structs.h"
-#include "PlayerSelector.h"
 
 //-------------------------------------------------------------- Constants
 
@@ -66,7 +65,7 @@ class GameEngine
         // Contract :
         //
 
-        static bool isTerminalState();
+        bool isTerminalState();
         // Usage :
         //
         // Contract :
@@ -153,7 +152,6 @@ class GameEngine
         int round, turn, numPlayerAlive;
         Players players;
 };
-
 
 
 #endif //GAMEENGINE_H

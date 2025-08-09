@@ -120,7 +120,7 @@ bool GameEngine::isAlive(const int &playerNum, const Coord &head) const
     Coord currentHead;
     if (head.x == -1 && head.y == -1)
     {
-        Coord currentHead = players.at(playerNum).snake.front();
+        currentHead = players.at(playerNum).snake.front();
     }
     else
     {
@@ -131,10 +131,10 @@ bool GameEngine::isAlive(const int &playerNum, const Coord &head) const
     if (players.at(playerNum).playerInfo.alive && isInbound(currentHead))
     {
         // Check if the head collides with any snake body part
-        for (const auto &pair : players)
+        for (const auto &player : players)
         {
-            int otherPlayerNum = pair.first;
-            const PlayersData &otherPlayerData = pair.second;
+            int otherPlayerNum = player.first;
+            const PlayersData &otherPlayerData = player.second;
 
             // Check each body part of the other player
             for (const Coord &bodyPart : otherPlayerData.snake)
@@ -153,7 +153,7 @@ bool GameEngine::isAlive(const int &playerNum, const Coord &head) const
         }
     }
 
-    return false;
+    return true;
 }  //----- End of isAlive
 
 bool GameEngine::isTerminalState()

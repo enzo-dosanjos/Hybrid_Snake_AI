@@ -191,9 +191,6 @@ package "MinimaxPackage" {
 
 package "GameEnginePackage" {
     class GameEngine {
-        // public attributes
-        - playerSelector : PlayerSelector
-        - observation : Observation
         // private attributes
         - config : GameConfig
         - round : int
@@ -259,9 +256,6 @@ package "GameEnginePackage" {
         + writeMove(move : int) : void
     }
 }
-
-
-GameEngine +-- PlayerSelector
 
 DQN --> ReplayBuffer
 DQN --> CNN

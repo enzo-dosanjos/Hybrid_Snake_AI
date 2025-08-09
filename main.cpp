@@ -61,15 +61,22 @@ int main() {
         }
         cout << ">]\n";
 
+        printf("> hello\n");
         int move = 1;
-        io.writeMove(move);
         Coord prevHead = gameEngine.getPlayers().at(0).snake.front();
+        printf("> hello\n");
         gameEngine.updateStep(0, move);
+        printf("> hello\n");
         observation.updateBoard(gameEngine.getPlayers(), 0, prevHead, i);
+        printf("> hello\n");
+        io.writeMove(move);
 
         int oppMove = io.readMove();
+        printf("> hello\n");
         Coord oppPrevHead = gameEngine.getPlayers().at(0).snake.front();
+        printf("> hello\n");
         gameEngine.updateStep(1, oppMove);
+        printf("> hello\n");
         observation.updateBoard(gameEngine.getPlayers(), 1, oppPrevHead, i);
     }
     return 0;
