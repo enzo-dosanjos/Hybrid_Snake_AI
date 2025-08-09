@@ -1,5 +1,5 @@
 /*************************************************************************
-CNN - A convolution neural network implementing a Q-learning agent
+CNN - A convolution neural network
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -13,7 +13,7 @@ CNN - A convolution neural network implementing a Q-learning agent
 using namespace std;
 
 //------------------------------------------------------- Personal Include
-#include "../include/CNN.h"
+#include "CNN.h"
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
@@ -33,17 +33,17 @@ void CNN::addLayer (string type, int kernelSize, int stride, const int padding, 
     // get the input size either from parameters or from the previous layer's output
     if (inputC == -1)
     {
-        layer.inputChannels = (cnn.empty()) ? nnInputSize : cnn.back().outputChannels;
+        layer.inputChannels = (nn.empty()) ? nnInputSize : nn.back().outputChannels;
     }
     else
     {
         layer.inputChannels = inputC;
     }
 
-    layer.position = cnn.size();
+    layer.position = nn.size();
 
-    cnn.push_back(layer);
-    initLayer(cnn.back());
+    nn.push_back(layer);
+    initLayer(nn.back());
 }  //----- end of addLayer
 
 
@@ -51,10 +51,10 @@ void CNN::copyWeights (const CNN &src)
 // Algorithm : Copy the weights and biases of the convolutional layers
 {
     // copy weights and biases of the convolutional layers
-    for (int layer = 0; layer < cnn.size(); layer++)
+    for (int layer = 0; layer < nn.size(); layer++)
     {
-        cnn[layer].weights = src.cnn[layer].weights;
-        cnn[layer].biases = src.cnn[layer].biases;
+        nn[layer].weights = src.nn[layer].weights;
+        nn[layer].biases = src.nn[layer].biases;
     }
 }  //----- End of copyWeights
 
@@ -62,7 +62,7 @@ void CNN::copyWeights (const CNN &src)
 Matrix<vector<float>> CNN::forwardPropagation(const Matrix<vector<float>> &input)
 // Algorithm : Compute the output of the neural network by propagating the input
 {
-    for (auto &layer : cnn)
+    for (auto &layer : nn)
     {
         if (layer.position == 0)
         {
@@ -77,7 +77,7 @@ Matrix<vector<float>> CNN::forwardPropagation(const Matrix<vector<float>> &input
         }
     }
 
-    return cnn.back().output;
+    return nn.back().output;
 }  //----- End of forwardPropagation
 
 
@@ -113,56 +113,35 @@ void CNN::resetGradients ()
 // Algorithm : Reset the gradients of every layers
 {
     // For each layer other than the input layer, put the gradients back to 0
-    for (int layer = 0; layer < cnn.size(); layer++)
+    for (int layer = 0; layer < nn.size(); layer++)
     {
-        for (int i = 0; i < cnn[layer].inputChannels; i++)
+        for (int i = 0; i < nn[layer].inputChannels; i++)
         {
-            for (int j = 0; j < cnn[layer].outputChannels; j++)
+            for (int j = 0; j < nn[layer].outputChannels; j++)
             {
-                for (int k = 0; k < cnn[layer].kernelSize; k++)
+                for (int k = 0; k < nn[layer].kernelSize; k++)
                 {
-                    fill(cnn[layer].weightGradient[i][j][k].begin(), cnn[layer].weightGradient[i][j][k].end(), 0.0);
+                    fill(nn[layer].weightGradient[i][j][k].begin(), nn[layer].weightGradient[i][j][k].end(), 0.0);
                 }
             }
         }
 
-        fill(cnn[layer].biasGradient.begin(), cnn[layer].biasGradient.end(), 0.0);
+        fill(nn[layer].biasGradient.begin(), nn[layer].biasGradient.end(), 0.0);
     }
 }  //----- End of resetGradients
 
 
-void CNN::spreadFCNNError(const vector<float> &fcnnError)
-// Algorithm : Spread the FCNN error across the last layer's feature maps
-{
-    // Distribute the error from the FCNN into the final CNN layer
-    ConvolutionalLayer &lastLayer = cnn.back();
-    int outChannels = lastLayer.outputChannels;
-    int outH = lastLayer.outputSize.first;
-    int outW = lastLayer.outputSize.second;
-
-    // Spread the FCNN error across the last layer's feature maps
-    for(int c = 0; c < outChannels; c++)
-    {
-        float perElementError = fcnnError[c] / float(outH * outW);
-        for(int y = 0; y < outH; y++)
-        {
-            for(int x = 0; x < outW; x++)
-            {
-                lastLayer.error[c][y][x] = perElementError;
-            }
-        }
-    }
-} //----- end of spreadFCNNError
-
-
-void CNN::backPropagation()
+void CNN::backPropagation(const Matrix<vector<float>> &error)
 // Algorithm : Compute the error of every layer by backpropagating the error
 // from the last layer
 {
-    for (auto it = cnn.rbegin() + 1; it != cnn.rend(); ++it)
+    // Set the error of the last layer
+    nn.back().error = error;
+
+    for (auto it = nn.rbegin() + 1; it != nn.rend(); ++it)
     {
         ConvolutionalLayer &current_layer = *it;
-        ConvolutionalLayer &next_layer = cnn[it->position + 1];
+        ConvolutionalLayer &next_layer = nn[it->position + 1];
 
         // Reset current layer's error to zero
         for (int oc = 0; oc < current_layer.outputChannels; oc++)
@@ -180,7 +159,7 @@ void CNN::backPropagation()
             {
                 for (int ol1_w = 0; ol1_w < next_layer.outputSize.second; ol1_w++)
                 {
-                    float error = next_layer.error[nextoc][ol1_h][ol1_w];
+                    float layerError = next_layer.error[nextoc][ol1_h][ol1_w];
 
                     // Iterate over kernel positions
                     for (int kh = 0; kh < next_layer.kernelSize; kh++)
@@ -199,7 +178,7 @@ void CNN::backPropagation()
                                 for (int ic = 0; ic < current_layer.outputChannels; ic++)
                                 {
                                     current_layer.error[ic][ol_h][ol_w] +=
-                                        error * next_layer.weights[ic][nextoc][kh][kw];
+                                        layerError * next_layer.weights[ic][nextoc][kh][kw];
                                 }
                             }
                         }
@@ -229,7 +208,7 @@ void CNN::backPropagation()
 void CNN::accumulateGradient()
 // Algorithm : Accumulate the weight and bias gradients for every layer
 {
-    for (auto &layer : cnn)
+    for (auto &layer : nn)
     {
         // For each output channel
         for (int oc = 0; oc < layer.outputChannels; oc++)
@@ -272,7 +251,7 @@ void CNN::accumulateGradient()
 void CNN::updateWeights(float learning_rate)
 // Algorithm : Update the weights and biases of every layer according to the gradient
 {
-    for (auto &layer : cnn)
+    for (auto &layer : nn)
     {
         // Update weights
         for (int oc = 0; oc < layer.outputChannels; oc++)
@@ -294,19 +273,6 @@ void CNN::updateWeights(float learning_rate)
         }
     }
 } //----- end of updateWeights
-
-
-void CNN::gradientDescent(const float learning_rate)
-// Algorithm : Perform the gradient descent on the neural network
-{
-    // Accumulate the gradients
-    accumulateGradient();
-
-    // Update weights and biases according to the gradient
-    updateWeights(learning_rate);
-
-} //----- end of gradientDescent
-
 
 //-------------------------------------------------------------- PROTECTED
 void CNN::initLayer (ConvolutionalLayer &layer)
@@ -378,7 +344,7 @@ Matrix<vector<float>> CNN::padInput(const Matrix<vector<float>> &input, Convolut
 void CNN::convolution (ConvolutionalLayer &layer, const Matrix<vector<float>> &in)
 // Algorithm : Compute the output of the layer by convolution
 {
-    Matrix<vector<float>> input = (layer.position == 0) ? in : cnn[layer.position-1].output;
+    Matrix<vector<float>> input = (layer.position == 0) ? in : nn[layer.position-1].output;
 
     Matrix<vector<float>> paddedInput = padInput(input, layer);
 
@@ -416,7 +382,7 @@ void CNN::convolution (ConvolutionalLayer &layer, const Matrix<vector<float>> &i
 } //----- end of computeLayer
 
 
-inline float CNN::ReLU(const float &input)
+float CNN::ReLU(const float &input)
 // Algorithm : Apply the ReLU activation function to the input
 {
     float output = input;

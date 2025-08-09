@@ -2,9 +2,10 @@
 CXX = g++
 CXXFLAGS = -ansi -pedantic -Wall -std=c++17
 TARGET = AI
-BUIL_DIR := build
+BUILD_DIR := build
 
-SOURCES = main.cpp CNN.cpp FCNN.cpp Minimax.cpp NNAI.cpp ReplayBuffer.cpp SpaceRiskAnalyzer.cpp Utils.cpp
+SOURCES = main.cpp \
+		  src/GameEngine/GameEngine.cpp src/GameEngine/InputHandler.cpp src/GameEngine/Observation.cpp src/GameEngine/PlayerSelector.cpp #src/GameEngine/StateAnalyzer.cpp
 OBJECTS = $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(SOURCES))
 
 all: $(TARGET)
@@ -17,6 +18,10 @@ $(TARGET): $(OBJECTS)
 $(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# Ensure build directory exists
+$(BUILD_DIR):
+	@mkdir -p $(BUILD_DIR)
 
 # Clean up everything
 clean:

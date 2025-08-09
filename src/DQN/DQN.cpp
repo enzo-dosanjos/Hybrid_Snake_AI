@@ -1,10 +1,10 @@
 /*************************************************************************
-NNAI - todo
+DQN - todo
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
 
-//--------- Implementation of the module <NNAI> (file NNAI.cpp) ---------
+//--------- Implementation of the module <DQN> (file DQN.cpp) ---------
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
@@ -16,19 +16,21 @@ NNAI - todo
 using namespace std;
 
 //------------------------------------------------------- Personal Include
-#include "../include/NNAI.h"
+#include "../include/DQN.h"
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-void NNAI::copyWeights (const NNAI &src) {
+void DQN::copyWeights (const DQN &src) {
     // copy weights and biases of the FCNN and the CNN
-    aiFCNN.copyWeights(src.aiFCNN);
+    fcnn.copyWeights(src.fcnn);
+    targetFcnn.copyWeights(src.targetFcnn);
 
-    aiCNN.copyWeights(src.aiCNN);
+    cnn.copyWeights(src.cnn);
+    targetCnn.copyWeights(src.targetCnn);
 }
 
 
-string NNAI::selectAction(const vector<float> &boardState, const vector<float> &extraState)
+string DQN::selectAction(const vector<float> &boardState, const vector<float> &extraState)
 // Algorithm : Selects an action using epsilon-greedy policy
 {
     // Random number generator
@@ -37,9 +39,9 @@ string NNAI::selectAction(const vector<float> &boardState, const vector<float> &
     if (dist(gen) < epsilon)
     {
         // Exploration: choose a random action
-        uniform_int_distribution<int> actionDist(0, LABEL_ACTIONS.size() - 1);
+        uniform_int_distribution<int> actionDist(0, ACTIONS.size() - 1);
         int randInd = actionDist(gen);
-        return LABEL_ACTIONS[randInd];
+        return ACTIONS[randInd];
     }
     else
     {
@@ -48,12 +50,12 @@ string NNAI::selectAction(const vector<float> &boardState, const vector<float> &
         auto itBestVal = max_element(qValues.begin(), qValues.end());
         int bestInd = distance(qValues.begin(), itBestVal);  // Use distance to get the index of the max element
 
-        return LABEL_ACTIONS[bestInd];
+        return ACTIONS[bestInd];
     }
 }  //----- End of selectAction
 
 
-vector<float> NNAI::forwardPropagation(const vector<float> &boardState, const vector<float> &extraState)
+vector<float> DQN::forwardPropagation(const vector<float> &boardState, const vector<float> &extraState)
 // Algorithm : Forward propagation through the neural network (CNN + FCNN)
 {
     // Reshape the board state to match the CNN input format
@@ -73,95 +75,61 @@ vector<float> NNAI::forwardPropagation(const vector<float> &boardState, const ve
 }  //----- End of forwardPropagation
 
 
-float NNAI::computeReward(const vector<float> &boardState, const vector<float> &extraState,
-                          const vector<float> &prevExtraState, const PlayersData &playerState,
-                          int myPlayer, int nbOppKillSetup, bool oppWillDie, bool oppDied, int turn)
-// Algorithm : Compute the reward for a given state
+vector<float> DQN::computeError (const vector<float> &targetOutput, Transition &transition)  // todo: implement n-step q-learning
+// Algorithm : Compute the error of the output layer based on the target Q-value,
+// the highest value of the target output and the Bellman equation
 {
-    // - If my snake's head collides with a border or its own body, return negative lot
-    // - If the opponent's snake head collides, return a positive lot
-    // - Otherwise, return a small positive reward for survival
-    float score = 0.0;
+    vector<float> error;
 
-    bool terminal = helper.checkTerminalState(boardState, playerState);
-    bool playerAlive = !helper.checkDeath(playerState, boardState, myPlayer);
+    // If the current episodes has ended, there's no futur so 0
+    float maxQ = transition.done ? 0.0 : *max_element(targetOutput.begin(), targetOutput.end());
 
-    float maxTurns = (M > 1) ? 0.8*(W*H*M) : (W*H*M);
-    NNRewards rewards(W, H, turn, maxTurns);
+    // Bellman equation : Compute the target Q-value for the action
+    float targetQ = transition.reward + gamma * maxQ;  // gamma controls the importance of future rewards
 
-    if (playerAlive && terminal)
+    // Compute the loss for the taken action, the other are set to 0
+    for (int i = 0; i < fcnn.back().outputSize; i++)
     {
-        score += rewards.winningMove;
-    }
-    else if (terminal)
-    {
-        return rewards.losingMove;
-    }
-    else
-    {
-        for (const auto &player : playerState)
+        if (ACTIONS[i] == transition.action)
         {
-            if (player.first != myPlayer)
+            float actionError = fcnn.back().output[i] - targetQ;
+            error[i] = actionError;
+            transition.tdError = actionError;
+        }
+        else
+        {
+            error[i] = 0.0;
+        }
+    }
+
+    return error;
+}
+
+
+void DQN::spreadError(const vector<float> &fcnnError)  // todo: check and rename
+// Algorithm : Spread the FCNN error across the last layer's feature maps
+{
+    // Distribute the error from the FCNN into the final CNN layer
+    ConvolutionalLayer &lastLayer = nn.back();
+    int outChannels = lastLayer.outputChannels;
+    int outH = lastLayer.outputSize.first;
+    int outW = lastLayer.outputSize.second;
+
+    // Spread the FCNN error across the last layer's feature maps
+    for(int c = 0; c < outChannels; c++)
+    {
+        float perElementError = fcnnError[c] / float(outH * outW);
+        for(int y = 0; y < outH; y++)
+        {
+            for(int x = 0; x < outW; x++)
             {
-                if (helper.checkDeath(playerState, boardState, player.first))
-                {
-                    cout << "> everyone dead" << endl;
-                    score += rewards.winningMove;
-                }
+                lastLayer.error[c][y][x] = perElementError;
             }
         }
     }
+} //----- end of spreadFCNNError
 
-    if (oppWillDie || oppDied)  // todo: check if it's my ai that killed the opp (works in 1v1)
-    {
-        score += rewards.winningMove;
-    }
-
-    score += rewards.killingSetupMove * nbOppKillSetup;
-
-    const int nbOpp = (playerState.size()-1);
-    const int ESCAPE_ROUTES_INDEX = 6*nbOpp + 3;
-    const int KILL_ZONE_INDEX = ESCAPE_ROUTES_INDEX + nbOpp;
-    const int PHASE_INDEX = KILL_ZONE_INDEX + nbOpp;
-    const int ENTROPY_INDEX = PHASE_INDEX + 1;
-
-    // Aggression rewards
-    float aggressionScore = 0.0;
-
-    for (int i = 0; i < playerState.size()-1; i++)
-    {
-        float killZoneValue = 1.0 / (1.0 + exp(-4.0*(extraState[KILL_ZONE_INDEX + i]-0.3)));  // sigmoid scaling for the killzone value
-        aggressionScore += rewards.killZoneEnterMove * killZoneValue;
-    }
-
-    for (int i = 0; i < playerState.size()-1; i++)
-    {
-        if(prevExtraState[ESCAPE_ROUTES_INDEX + i] - extraState[ESCAPE_ROUTES_INDEX + i] > 0)
-        {
-            aggressionScore += rewards.escapeReductionMove * (prevExtraState[ESCAPE_ROUTES_INDEX + i] - extraState[ESCAPE_ROUTES_INDEX + i]);
-        }
-    }
-
-    // Entropy penalty
-    const float minAcceptableEntropy = 0.7; // ~3 moves used
-    if(extraState[ENTROPY_INDEX] < minAcceptableEntropy) {
-        aggressionScore += ((minAcceptableEntropy - extraState[ENTROPY_INDEX])/minAcceptableEntropy) * rewards.entropyPenalty;
-    }
-
-    // Depends on the size for exponential reward
-    score += rewards.survivingMove * playerState.at(myPlayer).first.size();
-
-    // Z-score normalization
-    static float reward_mean = 0.0f;
-    static float reward_std = 1.0;
-    float z_score = ((score + aggressionScore) - reward_mean) / reward_std;
-    reward_mean = 0.99f * reward_mean + 0.01f * (score + aggressionScore);
-    reward_std = 0.99f * reward_std + 0.01f * fabs((score + aggressionScore) - reward_mean);
-    return z_score;
-}  //----- End of computeReward
-
-
-void NNAI::trainNN (vector<Transition> &batch, NNAI &targetNetwork, float learningRate, float gamma) {
+void DQN::train (vector<Transition> &batch, float learningRate) {
     // Reset gradients for both networks
     aiCNN.resetGradients();
     aiFCNN.resetGradients();
@@ -176,10 +144,10 @@ void NNAI::trainNN (vector<Transition> &batch, NNAI &targetNetwork, float learni
             targetNetwork.forwardPropagation(transition.nextBoardState, transition.nextExtraState);
 
         // Compute the error for FCNN
-        aiFCNN.computeError(targetQValues, transition, gamma);
+        vector<float> error = computeError(targetQValues, transition);
 
         // Backpropagation through FCNN
-        aiFCNN.backPropagation();
+        aiFCNN.backPropagation(error);
 
         // Spread error to CNN
         aiCNN.spreadFCNNError(aiFCNN.getError(0));
@@ -201,7 +169,7 @@ void NNAI::trainNN (vector<Transition> &batch, NNAI &targetNetwork, float learni
 } //----- end of trainNN
 
 
-ValidationResult NNAI::analyzeResults(const string &filename)
+ValidationResult DQN::analyzeResults(const string &filename)
 // Algorithm : Analyze the results of a game and return a ValidationResult
 // with extracted metrics from the game log file
 {
@@ -336,7 +304,7 @@ ValidationResult NNAI::analyzeResults(const string &filename)
 
 
 
-float NNAI::calculateScore(const ValidationResult &result)
+float DQN::calculateScore(const ValidationResult &result)
 // Algorithm : Calculate a composite score from the validation results
 {
     const float VICTORY_WEIGHT = 2.0;
@@ -366,7 +334,7 @@ float NNAI::calculateScore(const ValidationResult &result)
 }  //----- End of calculateScore
 
 
-void NNAI::validate(const vector<GameConfig>& validationSet)
+void DQN::validate(const vector<GameConfig>& validationSet)
 // Algorithm : Validate the agent on a set of configurations and save the scores
 {
     vector<float> scores;
@@ -421,7 +389,7 @@ void NNAI::validate(const vector<GameConfig>& validationSet)
 }  //----- End of validate
 
 
-void NNAI::saveToFile(const string& filename, int trainingStep)
+void DQN::saveToFile(const string& filename, int trainingStep)
 // Algorithm : Save the model and replay buffer to files
 {
     // Save model to one file
@@ -434,7 +402,7 @@ void NNAI::saveToFile(const string& filename, int trainingStep)
 }  //----- End of saveToFile
 
 
-void NNAI::loadFromFile(const string& filename, int &trainingStep)
+void DQN::loadFromFile(const string& filename, int &trainingStep)
 // Algorithm : Load the model and replay buffer from files
 {
     // Load model from one file
@@ -447,7 +415,7 @@ void NNAI::loadFromFile(const string& filename, int &trainingStep)
 }  //----- End of loadFromFile
 
 
-void NNAI::saveModelToFile(const string& filename)
+void DQN::saveModelToFile(const string& filename)
 // Algorithm : Save the FCNN and CNN architecture and layers
 {
     ofstream file(filename, ios::binary);
@@ -479,7 +447,7 @@ void NNAI::saveModelToFile(const string& filename)
 
 
 
-void NNAI::saveReplayBufferToFile(const string& filename, int trainingStep)
+void DQN::saveReplayBufferToFile(const string& filename, int trainingStep)
 // Save every transition of the replayBuffer and the training parameters
 {
     ofstream file(filename, ios::binary);
@@ -518,7 +486,7 @@ void NNAI::saveReplayBufferToFile(const string& filename, int trainingStep)
 
 
 
-void NNAI::loadModelFromFile(const string& filename)
+void DQN::loadModelFromFile(const string& filename)
 // Algorithm : Load the FCNN and CNN architecture and layers
 {
     ifstream file(filename, ios::binary);
@@ -557,7 +525,7 @@ void NNAI::loadModelFromFile(const string& filename)
 }  //----- End of loadModelFromFile
 
 
-void NNAI::loadReplayBufferFromFile(const string& filename, int &trainingStep)
+void DQN::loadReplayBufferFromFile(const string& filename, int &trainingStep)
 // Algorithm : Load the replay buffer and training parameters from a file
 {
     ifstream file(filename, ios::binary);
@@ -604,7 +572,7 @@ void NNAI::loadReplayBufferFromFile(const string& filename, int &trainingStep)
 
 
 //-------------------------------------------------------------- PROTECTED
-void NNAI::saveLayer(ofstream &file, const FullyConnectedLayer &layer)
+void DQN::saveLayer(ofstream &file, const FullyConnectedLayer &layer)
 // Algorithm : Save the parameters of a fully connected layer to a file
 {
     // Save layer type
@@ -628,7 +596,7 @@ void NNAI::saveLayer(ofstream &file, const FullyConnectedLayer &layer)
 }  //----- End of saveLayer
 
 
-void NNAI::saveConvLayer(ofstream &file, const ConvolutionalLayer &layer)
+void DQN::saveConvLayer(ofstream &file, const ConvolutionalLayer &layer)
 // Algorithm : Save the parameters of a convolutional layer to a file
 {
     // Save layer type
@@ -659,7 +627,7 @@ void NNAI::saveConvLayer(ofstream &file, const ConvolutionalLayer &layer)
 }  //----- End of saveConvLayer
 
 
-void NNAI::saveVector(ofstream& file, const vector<float>& vec)
+void DQN::saveVector(ofstream& file, const vector<float>& vec)
 // Algorithm : Save a vector of floats to a file
 {
     int size = vec.size();
@@ -671,7 +639,7 @@ void NNAI::saveVector(ofstream& file, const vector<float>& vec)
 }  //----- End of saveVector
 
 
-void NNAI::saveString(ofstream& file, const string& str)
+void DQN::saveString(ofstream& file, const string& str)
 // Algorithm : Save a string to a file
 {
     int size = str.size();
@@ -680,7 +648,7 @@ void NNAI::saveString(ofstream& file, const string& str)
 }  //----- End of saveString
 
 
-void NNAI::loadLayers(ifstream &file)
+void DQN::loadLayers(ifstream &file)
 // Algorithm : Load the parameters of a fully connected layer from a file
 // and add the layers to the FCNN
 {
@@ -714,7 +682,7 @@ void NNAI::loadLayers(ifstream &file)
 }  //----- End of loadLayers
 
 
-void NNAI::loadConvLayers(ifstream &file)
+void DQN::loadConvLayers(ifstream &file)
 // Algorithm : Load the parameters of a convolutional layer from a file
 // and add the layers to the CNN
 {
@@ -767,7 +735,7 @@ void NNAI::loadConvLayers(ifstream &file)
 }  //----- End of loadConvLayers
 
 
-void NNAI::loadVector(ifstream& file, vector<float>& vec)
+void DQN::loadVector(ifstream& file, vector<float>& vec)
 // Algorithm : Load a vector of floats from a file
 {
     int size;
@@ -780,7 +748,7 @@ void NNAI::loadVector(ifstream& file, vector<float>& vec)
 }  //----- End of loadVector
 
 
-void NNAI::loadString(ifstream& file, string& str)
+void DQN::loadString(ifstream& file, string& str)
 // Algorithm : Load a string from a file
 {
     int size;
@@ -793,10 +761,10 @@ void NNAI::loadString(ifstream& file, string& str)
 }  //----- End of loadString
 
 
-inline void NNAI::decayEpsilon()
+inline void DQN::decayEpsilon()
 // Algorithm : Decay epsilon to gradually shift from exploration to exploitation
 {
-    if (epsilon > epsilonMin)
+    if (epsilon > minEpsilon)
     {
         epsilon *= epsilonDecay;
     }

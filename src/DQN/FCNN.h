@@ -1,5 +1,5 @@
 /*************************************************************************
-FCNN - A fully connected neural network implementing a Q-learning agent
+FCNN - A fully connected neural network
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -11,27 +11,21 @@ FCNN - A fully connected neural network implementing a Q-learning agent
 //------------------------------------------------------------------------
 // Role of the <FCNN> module
 // The FCNN module implements a fully connected neural network (FCNN) that
-// is used to implement a Q-learning agent. The FCNN is used to approximate
-// the Q-values of the state-action pairs and is trained using a Deep
-// Q-Learning algorithm. The neural network is used to approximate the Q-values.
+// is used to implement a Q-learning agent.
 //------------------------------------------------------------------------
 
 //-------------------------------------------------------- Used interfaces
 #include "Structs.h"
 #include "ReplayBuffer.h"
-#include "Utils.h"
+#include "Reward.h"
 
 //-------------------------------------------------------------- Constants
-inline std::map<int, std::string> LABEL_ACTIONS = {
-    {0, "left"},
-    {1, "right"},
-    {2, "up"},
-    {3, "down"}
-};
 
 //------------------------------------------------------------------ Types
 struct FullyConnectedLayer {
-    std::string type;                // activation function (ex: ReLU)
+    int position;             // position in the neural network
+
+    std::string type;         // activation function (ex: ReLU)
     int inputSize;
     int outputSize;
 
@@ -42,8 +36,6 @@ struct FullyConnectedLayer {
     Matrix<float> weightGradient;
     std::vector<float> biasGradient;
     std::vector<float> error;
-
-    int position;
 };
 
 
@@ -84,17 +76,9 @@ class FCNN
         // Contract :
         //
 
-        void computeError (
-            const std::vector<float> &targetOutput,
-            Transition &transition,
-            float gamma
+        void backPropagation(
+            const std::vector<float> &error
         );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void backPropagation();
         // Usage :
         //
         // Contract :
@@ -113,15 +97,6 @@ class FCNN
         //
         // Contract :
         //
-
-        void gradientDescent(
-            float learning_rate
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-        
 
 //--------------------------------------------------------- SETTERS/GETTERS
         std::vector<float> getError(
@@ -161,10 +136,9 @@ class FCNN
 //---------------------------------------------- Constructors - destructor
         FCNN (
             int inputSize,
-            int boardC
+            const std::mt19937 &p_gen
         ) : nnInputSize(inputSize),
-            boardChannels(boardC),
-            gen(std::random_device()())  // Initialize with a random seed
+            gen(p_gen)
         {
             #ifdef MAP
                         cout << "Calling the constructor of fcnn" << endl;
@@ -218,8 +192,6 @@ class FCNN
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        int boardChannels;
-
         // NN Components
         std::vector<FullyConnectedLayer> nn;
         int nnInputSize;

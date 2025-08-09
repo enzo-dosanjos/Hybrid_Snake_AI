@@ -1,37 +1,27 @@
 /*************************************************************************
-Utils - utility functions for the game processing
+StateAnalyzer - todo
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
 
-//------------ Interface of the module <Utils> (file Utils.h) ------------
-#ifndef UTILS_H
-#define UTILS_H
+//---- Interface of the module <StateAnalyzer> (file StateAnalyzer.h) ----
+#ifndef STATEANALYZER_H
+#define STATEANALYZER_H
 
 //------------------------------------------------------------------------
-// Role of the <Utils> module
-// This module contains utility functions for the game processing.
+// Role of the <StateAnalyzer> module
+// todo
 //------------------------------------------------------------------------
 
 //-------------------------------------------------------- Used interfaces
+#include "GameEngine.h"
 #include "Structs.h"
 
-
 //----------------------------------------------------------------- PUBLIC
-class Utils
+class StateAnalyzer
 {
 //--------------------------------------------------------- Public Methods
     public:
-        std::vector<std::string> getValidMoves(
-          const std::vector<float> &boardState,  // todo: change
-          const Players &playerState,
-          int playerNum
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
         std::vector<float> computeExtraFeatures(
           const std::vector<float> boardState,  // todo: change
           const Players &playerState,
@@ -60,37 +50,20 @@ class Utils
         // Contract :
         //
 
-        Matrix<std::vector<float>> reshapeBoardState(
-                const std::vector<float> &flatBoardState
-            ) const;
-        // Usage :
-        //
-        // Contract :
-        //
-
-
 //---------------------------------------------- Constructors - destructor
-        Utils(
-            const GameConfig &p_config,
-            int boardChannels
-        ) : config(p_config), boardChannels(boardChannels)
-        // Usage :
-        //
-        // Contract :
-        //
+        StateAnalyzer(
+            const GameEngine &p_gameEngine
+        ) : gameEngine(p_gameEngine)
         {
             #ifdef MAP
-                cout << "Calling the constructor of Utils" << endl;
+                        cout << "Calling the constructor of StateAnalyzer" << endl;
             #endif
         };
 
-
-//---------------------------------------------------------------- PRIVATE
     private:
-        GameConfig config;
-        int boardChannels;
+        GameEngine gameEngine;
 };
 
 
 
-#endif //UTILS_H
+#endif //STATEANALYZER_H

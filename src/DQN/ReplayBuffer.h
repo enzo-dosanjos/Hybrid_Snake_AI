@@ -53,13 +53,11 @@ class ReplayBuffer
         //
 
         Transition createTransition(
-            const std::vector<float> &currentBoardState,
-            const std::vector<float> &currentExtraState,
-            const std::vector<float> &nextBoardState,
-            const std::vector<float> &nextExtraState,
-            const std::string &bestMove,
-            int turn,
-            const PlayersData &Players,
+            const std::vector<float> &prevBoardState,
+            const std::vector<float> &boardState,
+            const std::vector<float> &prevExtraState,
+            const std::vector<float> &extraState,
+            const std::string &action,
             float reward,
             bool done
         );
@@ -106,9 +104,10 @@ class ReplayBuffer
 
 //---------------------------------------------- Constructors - destructor
         explicit ReplayBuffer(
-            int cap
-        ) : capacity (cap),
-            gen(std::random_device()())  // Initialize with a random seed
+            int p_capacity,
+            const std::mt19937 &p_gen
+        ) : capacity (p_capacity),
+            gen(p_gen)  // Initialize with a random seed
         // Usage :
         //
         // Contract :
@@ -135,7 +134,7 @@ class ReplayBuffer
         std::vector<Transition> sample(
             int start,
             int end,
-            int count
+            int batchSize
         );
         // Usage :
         //
@@ -155,7 +154,7 @@ class ReplayBuffer
 
         void entropyInjection(
             std::vector<Transition>& batch,
-            float noiseRatio
+            float entropyWeight
         );
         // Usage :
         //
@@ -163,8 +162,8 @@ class ReplayBuffer
         //
 
         void removeLowPriority(
-            int nbToRemove,
-            float percentileThreshold = 0.2
+            int numToRemove,
+            float priorityThreshold = 0.2
         );
         // Usage :
         //

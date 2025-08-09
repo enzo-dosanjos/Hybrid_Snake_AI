@@ -44,13 +44,13 @@ Matrix<float> SpaceRiskAnalyzer::calculateRiskHeatmap(const int currentPlayer)
 // Algorithm : For every cell, calculate the risk factor for the current player based on the timing
 // taken by other players to reach the cell. An exponential decay is applied the further the lookahead
 {
-    Matrix<float> heatmap(W, H, 0.0);
+    Matrix<float> heatmap(config.W, config.H, 0.0);
 
     Matrix<int> currentTiming = precomputeCurrentPlayerTiming(lastReachData, currentPlayer);
 
-    for (int x = 0; x < W; x++)
+    for (int x = 0; x < config.W; x++)
     {
-        for (int y = 0; y < H; y++)
+        for (int y = 0; y < config.H; y++)
         {
             float cellRisk = 0.0;
 
@@ -88,7 +88,7 @@ pair<vector<float>, vector<float>> SpaceRiskAnalyzer::calculateAreas(const Playe
     // 0  : cell not reached
     // i  : cell reached only by player i
     // -1 : cell reached by multiple player
-    Matrix<int> visited(W, H, 0);
+    Matrix<int> visited(config.W, config.H, 0);
     vector<deque<Coord>> queues(numPlayer + 1);
 
     // Keep count of the number of reachable cells for each players
@@ -179,9 +179,9 @@ pair<vector<float>, vector<float>> SpaceRiskAnalyzer::calculateAreas(const Playe
 
     // Count the reachable space of each player by checking the cells with their number
     // the cells with -1 (contested cells) aren't counted as reachable
-    for (int x = 0; x < W; x++)
+    for (int x = 0; x < config.W; x++)
     {
-        for (int y = 0; y < H; y++)
+        for (int y = 0; y < config.H; y++)
         {
             if (visited[x][y] > 0)
             {
@@ -237,8 +237,8 @@ Matrix<unordered_map<int, int>> SpaceRiskAnalyzer::computeReachTiming(const Play
 // The BFS is stopped when the lookahead is reached.
 {
 
-    Matrix<unordered_map<int, int>> timingGrid(W, H, unordered_map<int, int>());
-    Matrix<int> steps(W, H, -1);
+    Matrix<unordered_map<int, int>> timingGrid(config.W, config.H, unordered_map<int, int>());
+    Matrix<int> steps(config.W, config.H, -1);
 
     queue<Coord> queue;  // Single BFS for all players to speed up the computation
 
@@ -296,11 +296,11 @@ Matrix<int> SpaceRiskAnalyzer::precomputeCurrentPlayerTiming( const Matrix<unord
                                                              int currentPlayer)
 // Algorithm : Precompute the timing grid for the current player
 {
-    Matrix<int> currentTiming(W, H, maxLookahead + 1);
+    Matrix<int> currentTiming(config.W, config.H, maxLookahead + 1);
 
-    for (int x = 0; x < W; x++)
+    for (int x = 0; x < config.W; x++)
     {
-        for (int y = 0; y < H; y++)
+        for (int y = 0; y < config.H; y++)
         {
             unordered_map<int, int>::const_iterator it = timingGrid[x][y].find(currentPlayer);
             currentTiming[x][y] = (it != end(timingGrid[x][y])) ? it->second : maxLookahead + 1;
@@ -315,8 +315,8 @@ pair<Matrix<bool>, Matrix<int>> SpaceRiskAnalyzer::precomputeOccupancy(const Pla
 // the same data for calculateAreas and calculateRiskHeatmap
 {
     // Precompute occupied cells and heads
-    Matrix<bool> occupied(W, H, false);
-    Matrix<int> heads(W, H, 0);
+    Matrix<bool> occupied(config.W, config.H, false);
+    Matrix<int> heads(config.W, config.H, 0);
 
     // Fill the matrices with every player's body parts
     for (const auto &player : playerState)

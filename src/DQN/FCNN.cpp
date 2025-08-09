@@ -1,5 +1,5 @@
 /*************************************************************************
-FCNN - A fully connected neural network implementing a Q-learning agent
+FCNN - A fully connected neural network
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -93,33 +93,6 @@ void FCNN::resetGradients ()
 }  //----- End of resetGradients
 
 
-void FCNN::computeError (const vector<float> &targetOutput, Transition &transition, float gamma)  // todo: implement n-step q-learning
-// Algorithm : Compute the error of the output layer based on the target Q-value,
-// the highest value of the target output and the Bellman equation
-{
-    // If the current episodes has ended, there's no futur so 0
-    float maxQ = transition.done ? 0.0 : *max_element(targetOutput.begin(), targetOutput.end());
-
-    // Bellman equation : Compute the target Q-value for the action
-    float targetQ = transition.reward + gamma * maxQ;  // gamma controls the importance of future rewards
-
-    // Compute the loss for the taken action, the other are set to 0
-    for (int i = 0; i < nn.back().outputSize; i++)
-    {
-        if (LABEL_ACTIONS[i] == transition.action)
-        {
-            float error = nn.back().output[i] - targetQ;
-            nn.back().error[i] = error;
-            transition.tdError = error;
-        }
-        else
-        {
-            nn.back().error[i] = 0.0;
-        }
-    }
-}
-
-
 void FCNN::accumulateGradient()
 // Algorithm : Accumulate the weight and bias gradients for the layer
 {
@@ -157,19 +130,6 @@ void FCNN::updateWeights(float learning_rate)
         }
     }
 } //----- end of updateWeights
-
-
-void FCNN::gradientDescent(float learning_rate)
-// Algorithm : Perform the gradient descent on the neural network
-{
-    // Accumulate the gradients
-    accumulateGradient();
-
-    // Update weights and biases according to the gradient
-    updateWeights(learning_rate);
-
-} //----- end of gradientDescent
-
 
 //-------------------------------------------------------------- PROTECTED
 void FCNN::initLayer (FullyConnectedLayer &layer)
@@ -216,10 +176,12 @@ void FCNN::computeLayer (FullyConnectedLayer &layer, const vector<float> &in)
 } //----- end of computeLayer
 
 
-void FCNN::backPropagation()
+void FCNN::backPropagation(const vector<float> &error)
 // Algorithm : Compute the error of the layer by backpropagating the error
 // from the next layer
 {
+    // Set the error of the last layer
+    nn.back().error = error;
     for(auto it = nn.rbegin() + 1; it != nn.rend(); ++it)
     {
         fill(it->error.begin(), it->error.end(), 0.0);

@@ -1,5 +1,5 @@
 /*************************************************************************
-CNN - A convolution neural network implementing a Q-learning agent
+CNN - A convolution neural network
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -20,20 +20,20 @@ CNN - A convolution neural network implementing a Q-learning agent
 
 //-------------------------------------------------------- Used interfaces
 #include "Structs.h"
-#include "Utils.h"
 
 //------------------------------------------------------------------ Types
 struct ConvolutionalLayer {
-    std::string type;
+    int position;             // position in the neural network
+
+    std::string type;         // activation function (ex: ReLU)
     int inputChannels;
     int outputChannels;
+    std::pair<int, int> outputSize;
 
     int kernelSize;
 
     int stride;
     int padding;
-
-    std::pair<int, int> outputSize;
 
     Matrix<std::vector<float>> input;
 
@@ -44,9 +44,8 @@ struct ConvolutionalLayer {
 
     Matrix<Matrix<float>> weightGradient;
     std::vector<float> biasGradient;
-    Matrix<std::vector<float>> error;
 
-    int position;
+    Matrix<std::vector<float>> error;
 };
 
 
@@ -99,15 +98,8 @@ class CNN
         // Contract :
         //
 
-        void spreadFCNNError(
-            const std::vector<float> &fcnnError
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
         void backPropagation(
+            const Matrix<std::vector<float>> &error
         );
         // Usage :
         //
@@ -128,19 +120,11 @@ class CNN
         // Contract :
         //
 
-        void gradientDescent(
-            float learning_rate
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
 
 //--------------------------------------------------------- SETTERS/GETTERS
     int getNNSize() const
     {
-        return cnn.size();
+        return nn.size();
     }
     // Usage :
     //
@@ -149,7 +133,7 @@ class CNN
 
     std::vector<ConvolutionalLayer> getNN() const
     {
-        return cnn;
+        return nn;
     }
     // Usage :
     //
@@ -158,17 +142,16 @@ class CNN
 
     void clearNN()
     {
-        cnn.clear();
+        nn.clear();
     }
 
 
 //---------------------------------------------- Constructors - destructor
         CNN(
               int inputSize,
-              int boardC
+              const std::mt19937 &p_gen
           ) : nnInputSize(inputSize),
-              boardChannels(boardC),
-              gen(std::random_device{}())
+              gen(p_gen)
         {
             #ifdef MAP
                 cout << "Calling the constructor of cnn" << endl;
@@ -195,11 +178,11 @@ class CNN
             const Matrix<std::vector<float>> &in = Matrix<std::vector<float>>()
         );
         // Usage :
-        //
+        //<
         // Contract :
         //
 
-        float ReLU(
+        static float ReLU(
             const float &input
         );
         // Usage :
@@ -209,9 +192,7 @@ class CNN
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        int boardChannels;
-
-        std::vector<ConvolutionalLayer> cnn;
+        std::vector<ConvolutionalLayer> nn;
         int nnInputSize;
 
         std::mt19937 gen;

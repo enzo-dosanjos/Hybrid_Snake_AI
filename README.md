@@ -59,7 +59,7 @@ The project implements a combination of 2 AI approaches in C++ without using any
 │   ├── NNAI.cpp              # Implementation of the combination of CNN and FCNN for AI
 │   ├── ReplayBuffer.cpp      # Implementation of a replay buffer for deep Q-Learning
 │   ├── SpaceRiskAnalyzer.cpp # Implementation of a spatial risk assessment class
-│   └── Utils.cpp             # Implementation of utility functions
+│   └── Reward.cpp             # Implementation of utility functions
 ```
 
 ---

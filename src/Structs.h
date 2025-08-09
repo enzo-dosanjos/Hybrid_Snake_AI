@@ -15,12 +15,10 @@ Structs  -  Contains all the structures, types and constants used in the
 //------------------------------------------------------------------------
 
 //---------------------------------------------------------------  INCLUDE
-#pragma once
-#include <map>
 #include <deque>
 #include <vector>
 #include <unordered_map>
-#include <string>
+#include <array>
 
 
 //------------------------------------------------------------------ Types
@@ -48,7 +46,7 @@ struct GameConfig {
     int W, H, M, N, P;
 
     bool operator==(const GameConfig &other) const {
-        return W == other.W && H == other.H && M == other.M;
+        return W == other.W && H == other.H && M == other.M;  // doesn't consider the number of players and the player's turn
     }
 };
 
@@ -56,6 +54,7 @@ struct GameConfig {
 struct PlayersInfo {
     Coord origin;
     bool alive;
+    std::vector<bool> actionMask; // actions that the player can perform, indexed by ACTIONS
 
     bool operator==(const PlayersInfo &other) const {
         return alive == other.alive &&
@@ -71,19 +70,19 @@ struct PlayersData {
 typedef std::unordered_map<int, PlayersData> Players;
 
 
-struct InputMinMaxAvg {
-    float min;
-    float max;
-    float avg;
+//-------------------------------------------------------------- Constants
+constexpr std::array<Coord, 4> DIRECTIONS = {
+    Coord{-1, 0},  // left
+    Coord{1, 0},  // right
+    Coord{0, -1},  // up
+    Coord{0, 1}  // down
 };
 
-
-//-------------------------------------------------------------- Constants
-const std::map<std::string, Coord> DIRECTIONS = {
-    {"left", Coord{-1, 0}},
-    {"right", Coord{1, 0}},
-    {"up", Coord{0, -1}},
-    {"down", Coord{0, 1}}
+const std::array<std::string, 4> ACTIONS = {
+    "left",
+    "right",
+    "up",
+    "down"
 };
 
 #endif //STRUCTS_H

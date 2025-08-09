@@ -1,15 +1,15 @@
 /*************************************************************************
-NNAI - Full DQN implementation for the game of Snake
+DQN - Full DQN implementation for the game of Snake
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
 
-//------------- Interface of the module <NNAI> (file NNAI.h) -------------
-#ifndef NNAI_H
-#define NNAI_H
+//------------- Interface of the module <DQN> (file DQN.h) -------------
+#ifndef DQN_H
+#define DQN_H
 
 //------------------------------------------------------------------------
-// Role of the <NNAI> module
+// Role of the <DQN> module
 // This module is a class that implements a full Deep Q-Network (DQN) with
 // a Convolutional Neural Network (CNN) and a Fully Connected Neural Network
 // (FCNN) to play the game of Snake. It includes methods to train the
@@ -24,41 +24,6 @@ NNAI - Full DQN implementation for the game of Snake
 #include "FCNN.h"
 
 //------------------------------------------------------------------ Types
-// Reward configuration  todo: optimise (genetic algo?)
-struct NNRewards {
-    const float winningMove;
-    const float losingMove;
-
-    // Aggression rewards
-    const float killingSetupMove;       // When the opps have less than 2 escape moves
-    const float killZoneEnterMove;       // When moving an opp into a kill zone (close to corner/walls)
-    const float escapeReductionMove;      // Per opponent escape route closed
-
-    // Anti-passivity
-    const float entropyPenalty;      // For low action diversity
-
-    const float survivingMove;
-
-    // Constructor takes parent reference
-    NNRewards(
-        int W,
-        int H,
-        int turn,
-        int maxTurns
-    ) :
-    winningMove((2.0 * W * H) * (1.0 + turn/float(maxTurns))),  // Reward later wins more
-    losingMove(-2.0 * W * H * (0.2 + 0.8*pow(turn/float(maxTurns), 2))), // Curved penalty
-
-    killingSetupMove(15.0 * sqrt(W*H)),
-    killZoneEnterMove(6.0 * sqrt(W*H)),
-    escapeReductionMove(2.4 * sqrt(W*H)),
-
-    entropyPenalty(-3.0 * sqrt(W*H)),
-    survivingMove(0.1 * sqrt(W*H))
-    {}
-};
-
-
 struct ValidationResult {
     bool victory;
     int survivalTurns;
@@ -72,21 +37,23 @@ struct ValidationResult {
 };
 
 //----------------------------------------------------------------- PUBLIC
-class NNAI
+class DQN
 {
 //--------------------------------------------------------- Public Methods
     public:
-        void copyWeights (
-            const NNAI &src
+
+
+        std::string selectAction(
+            const std::vector<float> &boardState,
+            const std::vector<float> &extraState
         );
         // Usage :
         //
         // Contract :
         //
 
-        std::string selectAction(
-            const std::vector<float> &boardState,
-            const std::vector<float> &extraState
+        void copyWeights (
+            const DQN &src
         );
         // Usage :
         //
@@ -102,27 +69,26 @@ class NNAI
         // Contract :
         //
 
-        float computeReward(
-            const std::vector<float> &boardState,
-            const std::vector<float> &extraState,
-            const std::vector<float> &prevExtraState,
-            const PlayersData &playerState,
-            int myPlayer,
-            int nbOppKillSetup,
-            bool oppWillDie,
-            bool oppDied,
-            int turn
+        std::vector<float> computeError (
+            const std::vector<float> &targetOutput,
+            Transition &transition
         );
         // Usage :
         //
         // Contract :
         //
 
-        void trainNN (
+        void spreadError(
+            const std::vector<float> &fcnnError
+        );
+        // Usage :
+        //
+        // Contract :
+        //
+
+        void train (
             std::vector<Transition> &batch,
-            NNAI &targetNetwork,
-            float learningRate,
-            float gamma
+            float learningRate
         );
         // Usage :
         //
@@ -206,23 +172,21 @@ class NNAI
         //
 
 //---------------------------------------------- Constructors - destructor
-        NNAI(
-              const GameConfig &p_config,
-              int boardC,
-              float eps = 1.0,
-              float minEps = 0.01,
-              float epsDecay = 0.995,
-              int replayBufferSize = 100000
-          ) : config(p_config),
-              boardChannels(boardC),
-              helper(p_config, boardC),
-              aiCNN(p_config.W * p_config.H * boardC, boardC),
-              aiFCNN(-1, p_config, boardC),  // the input size depends on the CNN output
+        DQN(
+              const GameConfig &config,
+              int boardChannels,
+              int replayBufferSize = 100000,
+              float p_epsilon = 1.0,
+              float p_minEpsilon = 0.01,
+              float p_epsilonDecay = 0.995,
+              const std::mt19937 &p_gen
+          ) : cnn(config.W * config.H * boardChannels, p_gen),
+              fcnn(-1, p_gen),  // the input size depends on the CNN output
               replayBuffer(replayBufferSize),
-              epsilon(eps),
-              epsilonMin(minEps),
-              epsilonDecay(epsDecay),
-              gen(std::random_device{}())
+              epsilon(p_epsilon),
+              minEpsilon(p_minEpsilon),
+              epsilonDecay(p_epsilonDecay),
+              gen(p_gen)
         {
             #ifdef MAP
                 cout << "Calling the constructor of NNAI" << endl;
@@ -320,25 +284,25 @@ class NNAI
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        GameConfig config;  // todo: remove
-        int boardChannels;
+        // Neural Networks
+        CNN cnn;
+        FCNN fcnn;
 
-        Utils helper;
-
-    public:
-        CNN aiCNN;
-        FCNN aiFCNN;
+        // Target Networks
+        CNN targetCnn;
+        FCNN targetFcnn;
 
         ReplayBuffer replayBuffer;
 
     private:
         float epsilon;         // Initial exploration rate
-        float epsilonMin;      // Minimum value of epsilon
+        float minEpsilon;      // Minimum value of epsilon
         float epsilonDecay;    // Decay factor for epsilon
+        float gamma;           // Discount factor for future rewards
 
         std::mt19937 gen;
 };
 
 
 
-#endif //NNAI_H
+#endif //DQN_H

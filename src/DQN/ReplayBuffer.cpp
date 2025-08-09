@@ -33,8 +33,7 @@ void ReplayBuffer::push(const Transition &transition)
 
 Transition ReplayBuffer::createTransition(const vector<float> &currentBoardState,
                                           const vector<float> &currentExtraState, const vector<float> &nextBoardState,
-                                          const vector<float> &nextExtraState, const string &bestMove, int turn,
-                                          const PlayersData &Players, float reward, bool done)
+                                          const vector<float> &nextExtraState, const string &bestMove, float reward, bool done)
 // Algorithm : Creates a transition
 {
     // --- Create and store transition ---
@@ -78,9 +77,9 @@ void ReplayBuffer::mergeSamples(vector<Transition> &top, vector<Transition> &res
 }  // ----- End of mergeSamples
 
 
-vector<Transition> ReplayBuffer::sample(int start, int end, int count)
-// Algorithm : Samples count elements from the buffer between
-// start and end indices. When [start, end] > count, elements
+vector<Transition> ReplayBuffer::sample(int start, int end, int batchSize)
+// Algorithm : Samples batchSize elements from the buffer between
+// start and end indices. When [start, end] > batchSize, elements
 // are randomly replaced to ensure diversity
 {
     vector<Transition> samples;
@@ -88,7 +87,7 @@ vector<Transition> ReplayBuffer::sample(int start, int end, int count)
     {
         for(int i = start; i < end; i++)
         {
-            if(samples.size() < count)
+            if(samples.size() < batchSize)
             {
                 samples.push_back(buffer[i]);
             }
@@ -98,7 +97,7 @@ vector<Transition> ReplayBuffer::sample(int start, int end, int count)
                 uniform_int_distribution<int> dist(0, i);
                 int j = dist(gen);
 
-                if(j < count)
+                if(j < batchSize)
                 {
                     samples[j] = buffer[i];
                 }
@@ -138,11 +137,11 @@ vector<Transition> ReplayBuffer::createBatch(int batchSize)
 }
 
 
-void ReplayBuffer::entropyInjection(vector<Transition>& batch, float noiseRatio)
+void ReplayBuffer::entropyInjection(vector<Transition>& batch, float entropyWeight)
 // Algorithm : Injects noise in the batch by randomly
 // replacing elements to increase diversity
 {
-    const int noiseCount = batch.size() * noiseRatio;
+    const int noiseCount = batch.size() * entropyWeight;
     uniform_int_distribution<int> dist(0, buffer.size() - 1);
 
     for(int i = 0; i < noiseCount; i++)
@@ -155,7 +154,7 @@ void ReplayBuffer::entropyInjection(vector<Transition>& batch, float noiseRatio)
 }  // ----- End of entropyInjection
 
 
-void ReplayBuffer::removeLowPriority(int nbToRemove, float percentileThreshold)
+void ReplayBuffer::removeLowPriority(int numToRemove, float priorityThreshold)
 // Algorithm : Removes the lowest priority transitions from the buffer
 // based on a threshold computed from the TD error
 {
@@ -172,7 +171,7 @@ void ReplayBuffer::removeLowPriority(int nbToRemove, float percentileThreshold)
 
     const float MIN_ERR = minIt->tdError;
     const float MAX_ERR = maxIt->tdError;
-    const float THRESHOLD = MIN_ERR + (MAX_ERR - MIN_ERR) * percentileThreshold;
+    const float THRESHOLD = MIN_ERR + (MAX_ERR - MIN_ERR) * priorityThreshold;
 
     // partition the buffer based on the threshold
     auto newEnd = partition(buffer.begin(), buffer.end(),
@@ -183,9 +182,9 @@ void ReplayBuffer::removeLowPriority(int nbToRemove, float percentileThreshold)
     const int REMAINING = distance(buffer.begin(), newEnd);
 
     // ensure that we don't remove more elements than necessary
-    if (REMAINING < buffer.size() - nbToRemove)
+    if (REMAINING < buffer.size() - numToRemove)
     {
-        newEnd = buffer.begin() + (buffer.size() - nbToRemove);
+        newEnd = buffer.begin() + (buffer.size() - numToRemove);
     }
 
     buffer.erase(newEnd, buffer.end());

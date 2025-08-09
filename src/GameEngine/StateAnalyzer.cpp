@@ -1,82 +1,39 @@
 /*************************************************************************
-Utils - utility functions for
+StateAnalyzer - todo
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
 
-//-------- Implementation of the module <Utils> (file Utils.cpp) ---------
+//- Implementation of the module <StateAnalyzer> (file StateAnalyzer.cpp) -
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
 #include <iostream>
-#include <cmath>
-#include <algorithm>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
-#include "../include/Utils.h"
+#include "StateAnalyzer.h"
 
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-vector<string> Utils::getValidMoves(const vector<float> &boardState, const Players &playerState, int playerNum)
-// Algorithm : Get the valid moves for the player
-{
-    vector<string> validMoves;
-
-    // skip dead players
-    if (!playerState.at(playerNum).playerInfo.alive)
-    {
-        return {};
-    }
-
-    Coord currentHead = playerState.at(playerNum).snake.front();
-    for (auto direction : DIRECTIONS)
-    {
-        Coord newHead = {currentHead.x + direction.second.x,
-                        currentHead.y + direction.second.y
-                        };
-
-        // check if the move is inbounds
-        if (isInbound(newHead.x, newHead.y))
-        {
-            // Check if the cell is empty (no part of my body or no other player)
-            bool cellEmpty = true;
-            int ind = (newHead.y * config.W + newHead.x) * boardChannels;
-
-            for (int i = 0; i < boardChannels; i++)
-            {
-                if (boardState[ind + i] != 0.0)
-                {
-                    cellEmpty = false;
-                    break;
-                }
-            }
-
-            if (cellEmpty)
-            {
-                validMoves.push_back(direction.first);
-            }
-        }
-    }
-
-    return validMoves;
-}  // ----- End of getValidMoves
-
-vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const Players &playerState,
+vector<float> StateAnalyzer::computeExtraFeatures(const vector<float> boardState, const Players &playerState,
                     unordered_map<int, vector<string>> validMoves, const deque<string> &last5Moves, int turn)
 // Algorithm : Compute extra features for the DQN model
-// Features:
-// For every opponent: min, max, avg distances between my snake's head and the opponent's body (normalized by max distance)
-// For every opponent: min, max, avg distances between the opponent's head and my body (normalized by max distance)
-// growth speed
-// nb of round before growth
-// snake size
-// For every opponent: escape routes (normalized 0-1)
-// For every opponent: kill zone score (0-1)
-// Phase-Based Aggression Coefficient (0-1)
-// action History Entropy (-1-1)
+// Spatial metrics :
+//     For every opponent: min distance between my snake's head and the opponent's body (normalized by max distance)
+//     For every opponent: min distance between the opponent's head and my body (normalized by max distance)
+// growth and size metrics :
+//     growth speed (normalized by the max growth speed) : M/10
+//     growth progress (normalized by M) : (M - (currentRound % M))/M
+//     snake size (normalized by the board size) : snake.size() / (W * H)
+// game metrics :
+//     game progress (normalized by the max number of turns) : min(turn / (MAX_TURNS), 1.0)
+// gameplay and aggressivity metrics :
+//     action History Entropy (normalized between -1 and 1) : tanh(calculateActionEntropy(last5Moves))
+//     For every opponent: escape routes (normalized 0-1)
+//     For every opponent: kill zone score (0-1)
 {
     vector<float> extras;
 
@@ -84,7 +41,7 @@ vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const 
     {
         for (auto &player : playerState)
         {
-            if (player.first != config.P)
+            if (player.first != gameEngine.config.P)
             {
                 validMoves[player.first] = getValidMoves(boardState, playerState, player.first);
             }
@@ -132,8 +89,8 @@ vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const 
         {
             const deque<Coord> &snake = player.second.snake;
 
-            botToPlayer.min = playerToBot.min = sqrt(config.W * config.W + config.H * config.H);  // max distance allowed
-                                                                                                  // by the board's size
+            botToPlayer.min = playerToBot.min = MAX_DISTANCE;  // max distance allowed
+                                                               // by the board's size
             botToPlayer.avg = playerToBot.avg = botToPlayer.max = playerToBot.max = 0;
 
             for (size_t i = 0; i < snake.size(); i++)
@@ -212,8 +169,7 @@ vector<float> Utils::computeExtraFeatures(const vector<float> boardState, const 
     return extras;
 }  // ----- End of computeExtraFeatures
 
-
-float Utils::calculateKillZoneProximity(Coord oppHead) const
+float Reward::calculateKillZoneProximity(Coord oppHead) const
 // Algorithm : Calculate the proximity of a player to a kill zone (corners and walls)
 {
     // Calculate corner proximity
@@ -248,7 +204,7 @@ float Utils::calculateKillZoneProximity(Coord oppHead) const
 }  // ----- End of calculateKillZoneProximity
 
 
-float Utils::calculateActionEntropy(const deque<string>& moves)
+float StateAnalyzer::calculateActionEntropy(const deque<string>& moves)
 // Algorithm : Calculate the entropy of the action history
 {
     if (moves.empty())
@@ -270,26 +226,3 @@ float Utils::calculateActionEntropy(const deque<string>& moves)
     }
     return entropy / 2.0;  // Max entropy for 4 moves = 2.0
 }  // ----- End of calculateActionEntropy
-
-
-Matrix<vector<float>> Utils::reshapeBoardState(const vector<float> &flatBoardState) const
-// Algorithm : Reshape the flat board state into a 3D matrix of the shape [channels][H][W]
-{
-    // Allocate the shaped board
-    Matrix<vector<float>> reshapedBoard(boardChannels, config.W, vector<float>(config.H, 0.0));
-
-    // Fill the shaped structure
-    for (int c = 0; c < boardChannels; c++)
-    {
-        for (int h = 0; h < config.H; h++)
-        {
-            for (int w = 0; w < config.W; w++)
-            {
-                int index = (h * config.W + w) * boardChannels + c;
-                reshapedBoard[c][h][w] = flatBoardState[index];
-            }
-        }
-    }
-
-    return reshapedBoard;
-}

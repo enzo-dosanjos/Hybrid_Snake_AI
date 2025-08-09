@@ -67,17 +67,14 @@ class Minimax
         //
 
         Minimax(
-            const GameConfig &p_config,
-            int boardC,
+            GameEngine p_gameEngine,
             int spaceRiskAnalyzerLookahead = 5,
             float spaceRiskAnalyzerDecay = 0.7
-        ) : config(p_config),
-            boardChannels(boardC),
-            gameEngine(p_config, boardC),  // todo: modify GameEngine constructor to accept the starting board
-            analyzer(p_config, boardC, spaceRiskAnalyzerLookahead, spaceRiskAnalyzerDecay)
+        ) : gameEngine(p_gameEngine),
+            analyzer(p_gameEngine.getConfig(), spaceRiskAnalyzerLookahead, spaceRiskAnalyzerDecay)
         {
             #ifdef MAP
-                        cout << "Calling the constructor of Minimax" << endl;
+                cout << "Calling the constructor of Minimax" << endl;
             #endif
         }
 
@@ -120,12 +117,8 @@ class Minimax
 
 
     private:
-        GameConfig config;  // todo: remove
-        int boardChannels;
-
-        MinimaxParams params;
-
         GameEngine gameEngine;
+        MinimaxParams params;
         SpaceRiskAnalyzer analyzer;
 };
 

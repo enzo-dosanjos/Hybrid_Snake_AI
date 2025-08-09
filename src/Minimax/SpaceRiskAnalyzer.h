@@ -18,7 +18,7 @@ SpaceRiskAnalyzer - A spatial risk assessment system for grid-based games
 
 //-------------------------------------------------------- Used interfaces
 #include "GameEngine.h"
-#include "Utils.h"
+#include "Reward.h"
 #include "Structs.h"
 
 //----------------------------------------------------------------- PUBLIC
@@ -65,14 +65,11 @@ class SpaceRiskAnalyzer
 //---------------------------------------------- Constructors - destructor
     SpaceRiskAnalyzer(
             const GameConfig &p_config,
-            const GameEngine &p_gameEngine,
             int lookahead = 5,
             float decay = 0.7
-    ) : W(p_config.W),
-        H(p_config.H),
+    ) : config(p_config),
         maxLookahead(lookahead),
-        decayFactor(decay),
-        gameEngine(p_gameEngine)
+        decayFactor(decay)
     {
         precomputeDecay();
     }
@@ -113,7 +110,7 @@ class SpaceRiskAnalyzer
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        int W, H;
+        GameConfig config;
         int maxLookahead;
         float decayFactor;
         std::vector<float> decayTable;
@@ -123,8 +120,6 @@ class SpaceRiskAnalyzer
         Players lastPlayerState;
         Matrix<bool> lastOccupied;
         Matrix<int> lastHeads;
-
-        GameEngine gameEngine;
 };
 
 
