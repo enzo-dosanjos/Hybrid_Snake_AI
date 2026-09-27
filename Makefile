@@ -1,7 +1,7 @@
 # Compilation variables
 CXX = g++
-CXXFLAGS = -ansi -pedantic -Wall -std=c++17
-CXXFLAGS_DEBUG = -ansi -pedantic -Wall -std=c++17 -g -DMAP
+CXXFLAGS = -pedantic -Wall -std=c++17
+CXXFLAGS_DEBUG = -pedantic -Wall -std=c++17 -g -DMAP
 TARGET = AI
 BUILD_DIR := build
 
@@ -9,10 +9,13 @@ SOURCES = main.cpp \
 		  src/GameEngine/GameEngine.cpp src/GameEngine/InputHandler.cpp src/GameEngine/Observation.cpp src/GameEngine/PlayerSelector.cpp #src/GameEngine/StateAnalyzer.cpp
 OBJECTS = $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(SOURCES))
 
-all: clean $(TARGET)
+.PHONY: all debug clean
 
-debug: CXXFLAGS := $(CXXFLAGS_DEBUG)
-debug: clean $(TARGET)
+all: $(TARGET)
+
+debug:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS="$(CXXFLAGS_DEBUG)" $(TARGET)
 
 # Compile the target executable
 $(TARGET): $(OBJECTS)
@@ -21,7 +24,7 @@ $(TARGET): $(OBJECTS)
 # Compile each source file into an object file
 $(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
 # Ensure build directory exists
 $(BUILD_DIR):
@@ -30,3 +33,7 @@ $(BUILD_DIR):
 # Clean up everything
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET)
+
+-include $(OBJECTS:.o=.d)
+
+include tests/Makefile

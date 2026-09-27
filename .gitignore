@@ -5,3 +5,4 @@ temp/
 train.cpp
 model.model
 best_params.txt
+/build/
