@@ -1,7 +1,16 @@
 # Hybrid AI for Competitive Snake
 
+![Recorded Snake match with numbered heads, connected bodies, ringed tails and move metrics](docs/images/match-demo.gif)
+
+*Illustrative hybrid match: two players grow every three rounds. An offensive
+heuristic tries to cut off the opponent; six-ply Minimax checks survival and
+rejects risky attacks. The animation shows which policy selected each move.
+
 ## Overview
-This is an advanced AI system for playing a multiplayer Snake games to participate in the [INSAlgo Snake Competition] (https://github.com/INSAlgo/Concours-Snake)
+
+![PROJECT UNDER REFACTORING — The test suite currently fails and the hybrid AI is not operational.](docs/images/refactoring-status.svg)
+
+This is an advanced AI system for playing a multiplayer Snake games to participate in the [INSAlgo Snake Competition](https://github.com/INSAlgo/Concours-Snake)
 
 The project implements a combination of 2 AI approaches in C++ without using any external libraries:
 1. **Minimax Algorithm with Alpha-Beta Pruning**  
@@ -37,6 +46,98 @@ The project implements a combination of 2 AI approaches in C++ without using any
   - Experience replay buffer for stable training.
   - Tools for saving/loading models and performance analytics.
   - Integrated validation routines to analyze victories, survival turns, rewards, Q-value consistency, and action entropy.
+
+---
+
+## Architecture
+
+The diagram below summarizes the target architecture for the refactoring.
+The complete class interfaces, ownership relationships and behavioral contracts
+are defined in [ClassDiagram.puml](ClassDiagram.puml).
+Arrows show component dependencies.
+
+```mermaid
+flowchart TD
+    subgraph Application
+        GameLoop[GameLoop]
+        TrainingLoop[TrainingLoop]
+        InputHandler[InputHandler]
+    end
+
+    subgraph Game[Game state and rules]
+        GameEngine[GameEngine]
+        GameState[GameState]
+        PlayerSelector[PlayerSelector]
+        Observation[Observation]
+        StateAnalyzer[StateAnalyzer]
+    end
+
+    subgraph Agents[Agent interface]
+        DQNAgent[DQNAgent]
+        MinimaxAgent[MinimaxAgent]
+        HybridAgent[HybridAgent]
+    end
+
+    subgraph Search[Adversarial search]
+        Minimax[Minimax]
+        SpaceRiskAnalyzer[SpaceRiskAnalyzer]
+    end
+
+    subgraph Learning[Deep reinforcement learning]
+        DQN[DQN]
+        Networks[Online and target CNN + FCNN]
+        ReplayBuffer[ReplayBuffer]
+        Reward[Reward]
+        ModelPersistence[ModelPersistence]
+        ResultValidation[ResultValidation]
+    end
+
+    GameLoop --> InputHandler
+    GameLoop --> GameEngine
+    GameLoop --> Agents
+    TrainingLoop --> GameEngine
+    TrainingLoop --> Agents
+    TrainingLoop --> DQN
+    TrainingLoop --> Observation
+    TrainingLoop --> StateAnalyzer
+    TrainingLoop --> Reward
+    TrainingLoop --> ModelPersistence
+    TrainingLoop --> ResultValidation
+    GameEngine --> GameState
+    GameEngine --> PlayerSelector
+    Observation --> GameState
+    StateAnalyzer --> GameState
+    DQNAgent --> Observation
+    DQNAgent --> StateAnalyzer
+    DQNAgent --> DQN
+    HybridAgent --> Observation
+    HybridAgent --> StateAnalyzer
+    HybridAgent --> DQN
+    HybridAgent --> Minimax
+    MinimaxAgent --> Minimax
+    Minimax --> SpaceRiskAnalyzer
+    Minimax -->|Simulates independent copies| GameEngine
+    DQN --> Networks
+    DQN --> ReplayBuffer
+    ModelPersistence --> DQN
+    ResultValidation --> Agents
+    ResultValidation --> GameEngine
+```
+
+- **GameEngine** owns the authoritative `GameState` and applies movement,
+  collisions, growth, deaths and turn scheduling. Search uses copied states and
+  the same transition rules as real play.
+- **Observation and StateAnalyzer** transform a state into board channels and
+  ordered numerical features. `EncodedState` groups these inputs with the legal
+  action mask; `Transition` stores a learning experience.
+- **Agents** share a `selectAction` interface. `DQNAgent` uses learned Q-values,
+  `MinimaxAgent` uses search scores, and `HybridAgent` combines their normalized
+  scores over legal actions using `(1 - lambda) * minimaxScore + lambda * qValue`.
+- **DQN** owns online and target networks plus its replay buffer. CNN features
+  pass through global average pooling and are combined with extra features before
+  the FCNN produces four action values.
+- **TrainingLoop** orchestrates episodes, rewards, replay training, target-network
+  updates, model persistence and validation. Agents borrow the learner's DQN.
 
 ---
 
