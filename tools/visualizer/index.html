@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Snake · Match viewer</title>
+    <link rel="stylesheet" href="Style.css">
+</head>
+<body>
+    <header><div><p class="eyebrow">HYBRID SNAKE AI / MATCH VIEWER</p><h1>Watch, play, review.</h1></div>
+        <div class="files"><label class="button">Open replay<input id="file" type="file" accept=".json" hidden></label><button id="save">Save replay</button></div>
+    </header>
+    <p id="message" role="status">Connecting to live game…</p>
+    <main>
+        <section class="arena">
+            <div class="bar"><strong id="clock">Waiting for a game</strong><span id="growth"></span></div>
+            <canvas id="board" width="960" height="720" aria-label="Snake board. Player positions and metrics appear beside it."></canvas>
+            <div class="legend"><span>▲ Numbered head</span><span>━ Connected body</span><span>○ Ringed tail</span><span>× Eliminated; body remains</span></div>
+            <div class="controls"><button id="back" aria-label="Previous frame">←</button><button id="play">Play</button><button id="next" aria-label="Next frame">→</button><input id="timeline" aria-label="Replay position" type="range" min="0" max="0" value="0"><select id="speed" aria-label="Playback speed"><option value="650">Slow</option><option value="250" selected>Normal</option><option value="80">Fast</option></select><button id="live">Follow live</button></div>
+        </section>
+        <aside><section class="decision"><p class="eyebrow">LAST MOVE · BEFORE → AFTER</p><h2 id="action">Initial positions</h2><p id="detail">Choose a replay or start a live match.</p></section><div id="players"></div>
+            <section id="human" hidden><h2>Your turn</h2><p>Use arrow keys or choose a legal direction.</p><div id="directions"></div></section>
+            <p class="note">Space counts reachable empty cells with bodies held fixed. It is not a survival prediction. Time is observed response latency, including communication (and human thinking).</p>
+        </aside>
+    </main>
+    <script src="Viewer.js"></script>
+</body>
+</html>

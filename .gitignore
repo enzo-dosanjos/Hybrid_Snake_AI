@@ -6,3 +6,7 @@ train.cpp
 model.model
 best_params.txt
 /build/
+
+# Local replay recordings and Python bytecode
+/replays/
+__pycache__/

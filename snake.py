@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import sys
+import time
 
 # Default Timeouts :
 TIMEOUT_LENGTH = 2  # sec
@@ -450,11 +451,17 @@ async def game(
     winner = None
 
     board = Board(w, h, p_pos, growth_rate)
+    observer = kwargs.get("observer")
+
+    if observer:
+        observer(board, players, None)
 
     # game loop
     while alive_players >= 2:
         i = turn % nb_players
         player = players[i]
+        started = time.perf_counter()
+        event = {"player": i + 1, "action": None, "outcome": "dead slot", "decisionMs": None}
 
         if not player.alive:
             await player.tell_other_players(players, f"death {i}")
@@ -470,6 +477,10 @@ async def game(
                 if isinstance(player, AI) or error in ("user interrupt", "timeout"):
                     break
 
+            event["decisionMs"] = round((time.perf_counter() - started) * 1000, 3)
+            event["action"] = user_input
+            event["outcome"] = error or "moved"
+
             # saving eventual error
             if not user_input:
                 await player.lose_game()
@@ -484,6 +495,7 @@ async def game(
                 try:
                     board.move(i, user_input)
                 except MoveError as e:
+                    event["outcome"] = str(e)
                     await player.lose_game()
                     errors[player] = error
                     player.alive = False
@@ -502,6 +514,11 @@ async def game(
 
         turn += 1
         board.turn = turn
+
+        if observer:
+            observer(board, players, event)
+
+        await asyncio.sleep(kwargs.get("turn_delay", 0))
 
     if alive_players == 1:
         winner = next(player for player in players if player.alive)
