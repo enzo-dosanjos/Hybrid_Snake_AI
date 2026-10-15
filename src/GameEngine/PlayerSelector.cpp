@@ -1,5 +1,5 @@
 /*************************************************************************
-PlayerSelector - Handler for player turn selection
+PlayerSelector - Advances player slots and rounds
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -7,22 +7,18 @@ PlayerSelector - Handler for player turn selection
 // Implementation of the module <PlayerSelector> (file PlayerSelector.cpp)
 
 //---------------------------------------------------------------- INCLUDE
-//--------------------------------------------------------- System Include
-#include <iostream>
-
-using namespace std;
-
 //------------------------------------------------------- Personal Include
 #include "PlayerSelector.h"
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-int PlayerSelector::nextPlayer(const Players &playerState)
-// Algorithm : Update the current player to the next alive player
+void PlayerSelector::advance(GameState &state) const
+// Algorithm : Advance one player slot and wrap to the next round after the last player.
 {
-    do {
-        currentPlayer = (currentPlayer % numPlayers) + 1;
-    } while (!playerState.at(currentPlayer).playerInfo.alive);
+    state.currentPlayer = (state.currentPlayer % state.config.N) + 1;
 
-    return currentPlayer;
-}  // ----- End of nextPlayer
+    if (state.currentPlayer == 1)
+    {
+        state.round++;
+    }
+}  //----- end of advance

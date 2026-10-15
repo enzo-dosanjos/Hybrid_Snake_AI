@@ -1,5 +1,5 @@
 /*************************************************************************
-GameEngine - Handles the game logic and operations
+GameEngine - Applies movement, collision, growth and turn scheduling
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -8,7 +8,7 @@ GameEngine - Handles the game logic and operations
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
-#include <iostream>
+#include <stdexcept>
 
 using namespace std;
 
@@ -17,185 +17,196 @@ using namespace std;
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-Players GameEngine::initPlayers(const vector<Coord> &playersOrigins)
-// Algorithm : Initialize players' snakes and info
+void GameEngine::updateStep(Action move)
+// Algorithm : Check collision before movement, apply growth and history, then advance exactly one turn.
 {
-    players = Players(config.N);
+    int action = static_cast<int>(move);
 
-    for (int i = 1; i <= config.N; ++i)
+    if (action < 0 || action >= static_cast<int>(ACTIONS.size()))
     {
-        Coord playerOrigin = playersOrigins[i];
-        players[i].snake.emplace_front(playerOrigin);
-
-        // Initialise Player's data
-        players[i].playerInfo.origin = playerOrigin;
-        players[i].playerInfo.alive = true;
-        players[i].playerInfo.actionMask = vector<bool>(ACTIONS.size(), true);  // All actions are valid at the start
+        throw invalid_argument("Invalid action");
     }
 
-    // Now that all players are initialized, set the initial action masks
-    for (int i = 1; i <= config.N; ++i)
+    int player = state.currentPlayer;
+
+    if (isTerminalFor(player))
     {
-        Coord head = players[i].snake.front();
-        updateActionMask(i, head);
+        throw logic_error("Cannot move in a terminal game or a dead player's slot");
     }
 
-    return players;
-}
-
-Players GameEngine::updateSnake(const int &currentPlayer, const Coord &newHead)
-// Algorithm : Update the snake's position based on the chosen action
-{
-    // --- Update players ---
-    players[currentPlayer].snake.emplace_front(newHead);
-
-    // --- Remove tail segments if it's not a growth round ---
-    if (round % config.M != 0)
+    if (!getActionMask(player)[action])
     {
-        // --- Update players ---
-        players[currentPlayer].snake.pop_back();
-    }
-
-    return players;
-}  // ----- End of updateSnake
-
-vector<bool> GameEngine::updateActionMask(const int &currentPlayer, const Coord &head)
-// Algorithm : Update the action mask for the current player
-// The action mask indicates which actions are valid for the current player
-{
-    vector<bool> &actionMask = players[currentPlayer].playerInfo.actionMask;
-
-    for (size_t i = 0; i < ACTIONS.size(); i++)
-    {
-        Coord potentialNewHead = computeNewCoord(head, i);
-        actionMask[i] = isAlive(currentPlayer, potentialNewHead);
-    }
-
-    return actionMask;
-}  // ----- End of updateActionMask
-
-Players GameEngine::updateStep(const int &currentPlayer, const int &move)
-// Algorithm : Update the game state. This method is called after each step
-{
-    if (!players[currentPlayer].playerInfo.alive)
-    {
-        // If the current player is already dead, no need to update
-        return players;
-    }
-
-    // Compute the new head position based on the current move
-    Coord currentHead = players[currentPlayer].snake.front();
-    Coord newHead = computeNewCoord(currentHead, move);
-
-    // Update players
-    updateSnake(currentPlayer, newHead);
-
-    // Update action mask for all players
-    for (int i = 1; i <= config.N; ++i)
-    {
-        Coord head = players[i].snake.front();
-        updateActionMask(i, head);
-    }
-
-    if (currentPlayer == config.P)
-    {
-        // Check if the AI will die after this move
-        if (willDieNextTurn(currentPlayer))
-        {
-            playerDied(currentPlayer);
-        }
-    }
-
-    // Update the round and turn counters
-    turn++;
-
-    // If we reached the last player, increment the round and reset the turn
-    if (turn == config.N)
-    {
-        round++;
-        turn = 0;
-    }
-
-    return players;
-}  // ----- End of updateStep
-
-Players GameEngine::playerDied(const int &playerNum)
-// Algorithm : Mark the player as dead and update the number of alive players
-{
-    if (players[playerNum].playerInfo.alive)
-    {
-        players[playerNum].playerInfo.alive = false;
-        numPlayerAlive--;
-    }
-
-    return players;
-}  // ----- End of playerDied
-
-bool GameEngine::isAlive(const int &playerNum, const Coord &head) const
-// Algorithm : Check if the player is alive by checking if the head of the snake
-// is inbounds and if the cell is occupied by only one presence (i.e. my head is
-// not on a cell occupied by another part of my body or the opponent's head)
-{
-    Coord currentHead;
-    if (head.x == -1 && head.y == -1)
-    {
-        currentHead = players.at(playerNum).snake.front();
+        // The runner checks collisions before changing the snake or releasing its tail.
+        playerDied(player);
     }
     else
     {
-        currentHead = head;
+        Coord head = state.players.at(player).snake.front();
+        updateSnake(player, computeNewCoord(head, move));
+        auto &history = state.lastMoves.at(player);
+        history.push_back(move);
+
+        if (history.size() > ACTION_HISTORY_SIZE)
+        {
+            history.pop_front();
+        }
+
+        updateActionMasks();
     }
 
-    // check if the move is inbounds
-    if (isInbound(currentHead, config))
+    finishTurn();
+}  //----- end of updateStep
+
+
+void GameEngine::playerDied(int playerNum)
+// Algorithm : Clear the alive flag and legal moves while keeping the body and schedule unchanged.
+{
+    auto &info = state.players.at(playerNum).playerInfo;
+    info.alive = false;
+    info.actionMask.reset();
+}  //----- end of playerDied
+
+
+void GameEngine::finishTurn()
+// Algorithm : Delegate one scheduled-slot advancement to the player selector.
+{
+    selector.advance(state);
+}  //----- end of finishTurn
+
+
+bool GameEngine::isAlive(int playerNum) const
+// Algorithm : Read the authoritative alive flag for the requested player.
+{
+    return state.players.at(playerNum).playerInfo.alive;
+}  //----- end of isAlive
+
+
+bool GameEngine::willDieNextTurn(int playerNum) const
+// Algorithm : Check whether the current position offers any legal move to the player.
+{
+    return getActionMask(playerNum).none();
+}  //----- end of willDieNextTurn
+
+
+bool GameEngine::isTerminalState() const
+// Algorithm : End the game when at most one player remains alive.
+{
+    return getNumPlayerAlive() <= 1;
+}  //----- end of isTerminalState
+
+
+bool GameEngine::isTerminalFor(int playerNum) const
+// Algorithm : End a player's episode on its death or on global game termination.
+{
+    return !isAlive(playerNum) || isTerminalState();
+}  //----- end of isTerminalFor
+
+
+GameEngine GameEngine::successor(Action move) const
+// Algorithm : Copy the complete engine and apply the same transition used in real play.
+{
+    GameEngine next = *this;
+    next.updateStep(move);
+    return next;
+}  //----- end of successor
+
+
+int GameEngine::getNumPlayerAlive() const
+// Algorithm : Count alive flags directly so the count cannot drift from player data.
+{
+    int count = 0;
+
+    for (const auto &[id, player] : state.players)
     {
-        // Check if the head collides with any snake body part
-        for (const auto &otherPlayer : players)
+        if (player.playerInfo.alive)
         {
-            int otherPlayerNum = otherPlayer.first;
-            const PlayersData &otherPlayerData = otherPlayer.second;
+            count++;
+        }
+    }
 
-            // Check each body part of the other player
-            for (const Coord &bodyPart : otherPlayerData.snake)
+    return count;
+}  //----- end of getNumPlayerAlive
+
+
+//---------------------------------------------------------------- PRIVATE
+void GameEngine::initPlayers(const vector<Coord> &playersOrigins)
+// Algorithm : Initialize one-based players at distinct free cells and create their empty action histories.
+{
+    if (playersOrigins.size() <= static_cast<size_t>(state.config.N))
+    {
+        throw invalid_argument("Missing player origins");
+    }
+
+    for (int player = 1; player <= state.config.N; player++)
+    {
+        Coord origin = playersOrigins[player];
+
+        if (!isFree(origin))
+        {
+            throw invalid_argument("Player origins must be distinct and inside the board");
+        }
+
+        auto &data = state.players[player];
+        data.snake.emplace_front(origin);
+        data.playerInfo.origin = origin;
+        data.playerInfo.alive = true;
+        state.lastMoves[player] = {};
+    }
+}  //----- end of initPlayers
+
+
+void GameEngine::updateSnake(int currentPlayer, const Coord &newHead)
+// Algorithm : Prepend the new head and release the tail only on a non-growth round.
+{
+    auto &snake = state.players.at(currentPlayer).snake;
+    snake.emplace_front(newHead);
+
+    if (state.round % state.config.M != 0)
+    {
+        snake.pop_back();
+    }
+}  //----- end of updateSnake
+
+
+void GameEngine::updateActionMasks()
+// Algorithm : Recompute legal neighbors for living players using the current occupancy.
+{
+    for (auto &[id, player] : state.players)
+    {
+        player.playerInfo.actionMask.reset();
+
+        if (!player.playerInfo.alive)
+        {
+            continue;
+        }
+
+        for (size_t action = 0; action < ACTIONS.size(); action++)
+        {
+            Coord cell = computeNewCoord(player.snake.front(), static_cast<Action>(action));
+            player.playerInfo.actionMask[action] = isFree(cell);
+        }
+    }
+}  //----- end of updateActionMasks
+
+
+bool GameEngine::isFree(const Coord &cell) const
+// Algorithm : Reject walls and every occupied segment, including the bodies of dead snakes.
+{
+    if (!isInbound(cell, state.config))
+    {
+        return false;
+    }
+
+    for (const auto &[id, player] : state.players)
+    {
+        for (const Coord &part : player.snake)
+        {
+            if (part == cell)
             {
-                // Skip checking the head against itself
-                if (otherPlayerNum == playerNum && &bodyPart == &otherPlayerData.snake.front())
-                {
-                    continue;
-                }
-
-                if (bodyPart == currentHead)
-                {
-                    return false;  // Collision detected
-                }
+                return false;
             }
         }
-
-        return true;  // No collision detected, player is alive
     }
 
-    return false;
-}  //----- End of isAlive
-
-bool GameEngine::willDieNextTurn(const int &playerNum) const
-// Algorithm : Check if the player will die in the next turn using the action mask
-{
-    bool willDie = true;
-    for (bool actionValid : players.at(playerNum).playerInfo.actionMask)
-    {
-        if (actionValid)
-        {
-            willDie = false;
-            break;
-        }
-    }
-
-    return willDie;
-}  // ----- End of willDieNextTurn
-
-bool GameEngine::isTerminalState()
-// Algorithm : Check if the game has reached a terminal state
-{
-    // Check if only one player is alive or if the current player is dead
-    return (numPlayerAlive <= 1 || !players[config.P].playerInfo.alive);
-}  // ----- End of isTerminalState
+    return true;
+}  //----- end of isFree

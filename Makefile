@@ -6,7 +6,11 @@ TARGET = AI
 BUILD_DIR := build
 
 SOURCES = main.cpp \
-		  src/GameEngine/GameEngine.cpp src/GameEngine/InputHandler.cpp src/GameEngine/Observation.cpp src/GameEngine/PlayerSelector.cpp #src/GameEngine/StateAnalyzer.cpp
+          src/GameEngine/GameEngine.cpp \
+          src/GameEngine/InputHandler.cpp \
+          src/GameEngine/Observation.cpp \
+          src/GameEngine/PlayerSelector.cpp \
+          src/GameEngine/StateAnalyzer.cpp
 OBJECTS = $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(SOURCES))
 
 .PHONY: all debug clean

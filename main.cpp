@@ -1,130 +1,108 @@
 /*************************************************************************
-main - Main function of the program
+main - Plays the competition game
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
 
-#include <iostream>
-#include <algorithm>
-#include <random>
-#include <vector>
+//--------- Implementation of the module <main> (file main.cpp) ---------
 
-#include "src/GameEngine/GameEngine.h"
-#include "src/Structs.h"
-#include "src/GameEngine/InputHandler.h"
-#include "src/GameEngine/Observation.h"
-#include "src/GameEngine/PlayerSelector.h"
+//---------------------------------------------------------------- INCLUDE
+//--------------------------------------------------------- System Include
+#include <iostream>
+#include <random>
+#include <stdexcept>
+#include <vector>
 
 using namespace std;
 
+//------------------------------------------------------- Personal Include
+#include "src/GameEngine/GameEngine.h"
+#include "src/GameEngine/InputHandler.h"
 
-int main() {
-    InputHandler io;
+//----------------------------------------------------------------- PUBLIC
+//--------------------------------------------------------- Public Methods
+int main()
+// Algorithm : Choose legal moves on our turns and apply external events once in scheduled-player order.
+{
+    try
+    {
+        GameConfig config = InputHandler::readGameConfig();
+        auto origins = InputHandler::readPlayersOrigins(config.N);
+        GameEngine engine(config, origins);
+        mt19937 gen(random_device{}());
+        int lastDeath = 0;
 
-    // Read game configuration
-    GameConfig gameConfig = io.readGameConfig();
-    vector<Coord> playersOrigins = io.readPlayersOrigins(gameConfig.N);
-
-    // Initialize game engine
-    GameEngine gameEngine(gameConfig, playersOrigins);
-
-    PlayerSelector playerSelector(gameConfig.N, gameConfig.P);
-
-    // Initialize observation
-    int boardChannels = 9; // 9 Channels for each observation in each cell
-    Observation observation(gameConfig, playersOrigins, boardChannels);
-
-    Matrix<vector<float>> a = observation.getObservation();
-
-    for (int x = 0; x < gameConfig.W; ++x) {
-        cout << "> [";
-        for (int y = 0; y < gameConfig.H; ++y) {
-            cout << "[";
-            const auto& channels = a[y][x];
-            for (size_t k = 0; k < channels.size(); ++k) {
-                cout << channels[k];
-                if (k + 1 < channels.size()) cout << ", ";
-            }
-            cout << "]";
-            if (y + 1 < gameConfig.H) cout << ", ";
-        }
-        cout << "]\n";
-    }
-
-    while (!gameEngine.isTerminalState()) {
-        int move;
-        if (playerSelector.getCurrentPlayer() == gameConfig.P)
+        while (!engine.isTerminalFor(config.P))
         {
-            // Randomly choose a move from the action mask
-            vector<int> validMoves;
-            for (size_t i = 0; i < ACTIONS.size(); i++)
+            if (engine.getState().currentPlayer == config.P)
             {
-                cout << "> Action mask for action " << ACTIONS[i] << ": " << gameEngine.getActionMask(gameConfig.P)[i] << "\n";
-                if (gameEngine.getActionMask(gameConfig.P)[i])
+                vector<Action> moves;
+                ActionMask mask = engine.getActionMask(config.P);
+
+                for (size_t action = 0; action < ACTIONS.size(); action++)
                 {
-                    validMoves.push_back(i);
+                    if (mask[action])
+                    {
+                        moves.push_back(static_cast<Action>(action));
+                    }
                 }
+
+                if (moves.empty())
+                {
+                    engine.playerDied(config.P);
+                    break;
+                }
+
+                uniform_int_distribution<size_t> choice(0, moves.size() - 1);
+                Action move = moves[choice(gen)];
+                InputHandler::writeMove(move);
+                engine.updateStep(move);
+                continue;
             }
 
-            if (validMoves.empty()) {
-                // No valid moves: treat as death and break
-                io.processDeathEvent();
+            GameEvent event = InputHandler::readEvent(config.N);
+
+            if (event.type == GameEventType::End)
+            {
                 break;
             }
 
-            random_device rd;
-            mt19937 gen(rd());
-            uniform_int_distribution<> dis(0, validMoves.size() - 1);
-            move = validMoves[dis(gen)];
+            if (event.type == GameEventType::InputError)
+            {
+                throw invalid_argument(event.error);
+            }
 
-            io.writeMove(move);
-        }
-        else
-        {
-            pair<string, int> action = io.readAction();
-            if (action.first == "death") {
-                gameEngine.playerDied(action.second+1); // player numbers are 1-indexed
-                io.processDeathEvent();
+            // A collision produces both death and move messages in snake.py; its turn was already counted.
+            if (event.type == GameEventType::Move && event.player == lastDeath)
+            {
+                lastDeath = 0;
                 continue;
             }
-            move = io.readMove();
-        }
 
-        int player = playerSelector.getCurrentPlayer();
-        gameEngine.updateStep(player, move);
-        // display players
-        for (int p = 1; p <= gameConfig.N; ++p) {
-            const auto &snake = gameEngine.getPlayers().at(p).snake;
-            cout << "> Player " << p << " snake: ";
-            for (const auto &part : snake) {
-                cout << "(" << part.x << ", " << part.y << ") ";
+            lastDeath = 0;
+
+            if (event.player != engine.getState().currentPlayer)
+            {
+                throw invalid_argument("Game event does not match the scheduled player");
             }
-            cout << "\n";
-        }
-        int round = gameEngine.getRound();
-        observation.updateBoard(gameEngine.getPlayers(), player, round);
 
-        Matrix<vector<float>> a = observation.getObservation();
-        for (int x = 0; x < gameConfig.W; ++x) {
-            cout << "> [";
-            for (int y = 0; y < gameConfig.H; ++y) {
-                cout << "[";
-                const auto& channels = a[y][x];
-                for (size_t k = 0; k < channels.size(); ++k) {
-                    cout << channels[k];
-                    if (k + 1 < channels.size()) cout << ", ";
-                }
-                cout << "]";
-                if (y + 1 < gameConfig.H) cout << ", ";
+            if (event.type == GameEventType::Death)
+            {
+                engine.playerDied(event.player);
+                engine.finishTurn();
+                lastDeath = event.player;
             }
-            cout << "]\n";
+            else
+            {
+                engine.updateStep(*event.action);
+            }
         }
-
-        playerSelector.nextPlayer(gameEngine.getPlayers());
-
-        // Flush output buffer
-        cout.flush();
+    }
+    catch (const exception &error)
+    {
+        cerr << error.what() << endl;
+        return 1;
     }
 
     return 0;
-}
+}  //----- end of main

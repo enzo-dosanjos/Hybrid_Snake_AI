@@ -167,29 +167,67 @@ flowchart TD
 
 ## Game State Representation
 
+`Observation::encode(state, perspective)` and
+`StateAnalyzer::computeExtraFeatures(state, perspective)` consume a valid engine
+snapshot and return owned values. Neither component retains or mutates a state.
+Player IDs are `1..N`; the perspective is explicit and need not be the scheduled
+player. Legal-action masks come from the engine snapshot.
+
 ### Board State
-The board is represented as a flattened 2D grid with **6 channels per cell**:
-- **Channel 0:** My snake head
-- **Channel 1:** My snake body
-- **Channel 2:** Opponent snake head
-- **Channel 3:** Opponent snake body
-- **Channel 4:** X coordinate (normalized)
-- **Channel 5:** Y coordinate (normalized)
+
+Layout is `[channel][y][x]`, with nine channels:
+
+| Channel | Value |
+| --- | --- |
+| 0, 1, 2 | Perspective player's head, interior body and tail |
+| 3, 4, 5 | All opponents' heads, interior bodies and tails |
+| 6 | Unoccupied cell (not reachability) |
+| 7 | Perspective head x / (W - 1), broadcast to all cells |
+| 8 | Perspective head y / (H - 1), broadcast to all cells |
+
+A one-segment snake is both head and tail. Dead snakes retain their occupied
+channels. Coordinate channels are zero when the corresponding dimension is one.
 
 ### Extracted Features
-- **Distance Metrics:**
-  - For every opponent: Minimum, maximum, and average distances from my snake's head to the opponent’s body (normalized by max distance)
-  - For every opponent: Minimum, maximum, and average distances from the opponent's head to my snake's body (normalized by max distance)
-- **Growth Metrics:**
-  - Growth speed
-  - Rounds remaining until growth
-  - Current snake size
-- **Spatial Metrics:**
-  - For every opponent: escape routes (normalized 0-1)
-  - For every opponent: kill zone score (proximity to danger zones, normalized 0-1)
-- **Behavioral Metrics:**
-  - Phase-Based Aggression Coefficient (0-1)
-  - action History Entropy (-1-1)
+
+A fixed player count produces
+`StateAnalyzer::getFeatureCount(N) = 7 + 10*(N - 1)` values, independent of board
+size, insertion order and deaths. Opponent slots always follow ascending player
+ID with the perspective player omitted.
+
+Concatenate these blocks in order:
+
+| Block | Values, in order | Size |
+| --- | --- | --- |
+| Spatial, one block per opponent | Alive flag; own head to opponent segments: min, max, average distance; opponent head to own segments: min, max, average distance | 7*(N - 1) |
+| Growth and size | M / 10; rounds until growth / M; own snake length / (W*H) | 3 |
+| Progress | Capped elapsed scheduled slots / heuristic turn budget | 1 |
+| Own status and schedule | Own alive flag; tanh(own normalized action entropy); (currentPlayer - 1) / (N - 1) | 3 |
+| Opponent gameplay, one block per opponent | Legal-action count / 4; wall/corner proximity; tanh(normalized action entropy) | 3*(N - 1) |
+
+For N=1, scheduled-player encoding is zero and opponent blocks are empty.
+Both blocks for a dead opponent are entirely zero, including history metrics.
+Its body still appears in the board tensor and blocks engine-calculated legal
+moves. Changing a dead body's coordinates in a synthetic snapshot without
+recomputing legal masks does not update those derived masks.
+
+### Formulas and Conventions
+
+- Distances retain the original Euclidean normalization `sqrt(W*W + H*H)` and
+  include all stored segments (head and tail included).
+- Growth uses the authoritative round, including dead-player slots. Rounds until
+  growth are `(M - round % M) % M`: zero means the current round grows.
+  `M / 10` retains the original scaling and can exceed one when M > 10.
+- Elapsed slots are `round*N + currentPlayer - 1`. The original turn-budget
+  heuristic is `W*H*M`, multiplied by 0.8 when M > 1. Progress is clamped to
+  `[0,1]`; it does not determine termination or promise a maximum game duration.
+- Entropy is `-sum(p*log2(p))/2`, giving zero for empty/repeated histories and one
+  for equally distributed actions. Features retain the original `tanh` transform.
+  Missing histories encode zero; engine histories hold the last five moves.
+  Own history is zero when the perspective player is dead.
+- Wall/corner proximity adds 0.5 for each axis within its outer quarter, then
+  averages that weight with `1 - nearestWallDistance/(max(W,H)/2)`.
+  Edge checks are symmetric and the result is clamped to `[0,1]`.
 
 ---
 
