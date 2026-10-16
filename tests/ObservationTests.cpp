@@ -145,6 +145,19 @@ void testSnapshotEncoding()
 }  //----- end of testSnapshotEncoding
 
 
+void testDeadBodyAndSingleCell()
+// Algorithm : Tests retained dead-body channels and finite head coordinates on a one-cell board.
+{
+    GameEngine engine({5, 4, 2, 3, 1}, {{0, 0}, {0, 0}, {4, 3}, {4, 0}});
+    engine.playerDied(2);
+    checkObservation(engine.getState(), 1);
+    checkObservation(engine.getState(), 2);
+
+    GameEngine single({1, 1, 1, 1, 1}, {{0, 0}, {0, 0}});
+    checkObservation(single.getState(), 1);
+}  //----- end of testDeadBodyAndSingleCell
+
+
 vector<TestCase> getTests()
 // Algorithm : Registers this component’s named test functions for independent selection and execution.
 {
@@ -152,6 +165,7 @@ vector<TestCase> getTests()
         {"shapes_and_perspectives", testShapesAndPerspectives},
         {"body_and_tail_channels", testBodyAndTailChannels},
         {"growth_and_tail_release", testGrowthAndTailRelease},
-        {"snapshot_encoding", testSnapshotEncoding}
+        {"snapshot_encoding", testSnapshotEncoding},
+        {"dead_body_and_single_cell", testDeadBodyAndSingleCell}
     };
 }  //----- end of getTests
