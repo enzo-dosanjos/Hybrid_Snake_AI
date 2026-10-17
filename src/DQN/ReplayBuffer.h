@@ -24,19 +24,6 @@ ReplayBuffer - A replay buffer for the Deep Q-Learning algorithm
 
 
 //------------------------------------------------------------------ Types
-struct Transition {
-    std::vector<float> boardState;        // State of the board (1st input of the DQN)
-    std::vector<float> extraState;        // State of the extras (2nd input of the DQN)
-
-    std::string action;                   // choosen action
-    float reward;                         // reward given
-
-    std::vector<float> nextBoardState;    // next state of the board
-    std::vector<float> nextExtraState;    // next state of the extras
-
-    bool done;                            // indicate if the episode has ended
-    float tdError;                        // temporal difference error
-};
 
 
 //----------------------------------------------------------------- PUBLIC

@@ -144,7 +144,7 @@ class GameEngine
 
         explicit GameEngine(
             const GameState &snapshot
-        )
+        ) : state(snapshot)
         // Algorithm : Copy the snapshot, validate its schedule and player data, then refresh derived masks.
         {
             validateGameConfig(state.config);

@@ -14,8 +14,9 @@ Commit the workflow, `tests/Makefile`, both C++ runners and all component test
 files so they are available in GitHub's clean checkout.
 
 Failures and compilation blockers fail CI, including unfinished refactoring
-interfaces. Completing stages 1–4 alone does not make checkpoint 1 pass: it also
-includes Observation and StateAnalyzer. No deployment is configured.
+interfaces. Checkpoint 1 now passes all five suites: game-engine, input-handler,
+game-loop, observation and state-analyzer (28 named tests). Checkpoints 2 and 3
+still include unfinished components.
 
 ## Local execution
 
@@ -71,8 +72,8 @@ todo : Delete that function and its argument branch when the refactoring is comp
 ## API alignment
 
 Game, agent, feature and learning tests use the target API from
-`ClassDiagram.puml`. Later agent, feature and learning suites remain build-blocked
-until their interfaces exist.
+`ClassDiagram.puml`. Checkpoint 1 interfaces are implemented. Later agent and
+learning suites remain build-blocked until their interfaces exist.
 Neural-network tests use the existing public layer-building and inspection APIs;
 
 Failed persistence loads must report an exception and preserve the existing model.
