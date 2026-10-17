@@ -40,16 +40,16 @@ package "Shared contracts" {
     end note
 
     note bottom of EncodedState
-        BoardTensor layout: [channel][y][x], 9 channels.
-        0..2: own head/body/tail; 3..5: opponent head/body/tail;
-        6: unoccupied cell; 7..8: normalized own head x/y.
-        All coordinates and channels are rebuilt from GameState.
-        One model supports a fixed N; W and H may vary.
-        Extra features have a fixed, versioned order and length:
-        opponents ordered by ID, retaining slots for dead players
-        with an alive indicator and zeroed opponent metrics.
-        Features include growth phase, scheduled player, and bounded
-        action-history metrics used by rewards; perspective is explicit.
+        BoardTensor layout: [channel][y][x], 4*N+1 channels (schema 2).
+        Each player has head/body/tail/segment-order channels;
+        segment order = (index from head + 1)/(W*H); final channel is free cells.
+        Slots: perspective player first, then ascending opponent IDs.
+        Dead bodies retain their geometry. One model supports a fixed N.
+        Required extra context: W,H,M,round%M,round,currentPlayer,perspective,
+        then player ID and alive flag for every board slot.
+        FeatureSelection enables derived distance, size, progress, mobility
+        and wall-proximity groups. Histories are diagnostic, not model inputs.
+        Both schemas and feature selection must be checked when loading weights.
         Action values and masks use the Action enum order.
     end note
 }
@@ -314,7 +314,7 @@ package "Application" {
         Builds transitions from one learner decision to its next,
         or to its death/game end; stores the action actually executed.
         Reward covers that complete interval; gamma is per decision.
-        History and turn context are encoded by the shared encoders.
+        Rules, identities and turn context are encoded by the shared encoders.
         done also covers an empty next legal-action mask.
         Owns the DQN borrowed by the behavior agent, schedules replay
         training/target synchronization and invokes persistence/validation.

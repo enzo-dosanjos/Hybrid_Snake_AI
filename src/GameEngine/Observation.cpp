@@ -30,24 +30,25 @@ BoardTensor Observation::encode(const GameState &state, int perspective) const
         throw invalid_argument("Cannot encode an empty snake");
     }
 
-    BoardTensor board(BOARD_CHANNELS, Matrix<float>(config.W, config.H, 0.f));
-    Coord head = snake.front();
-    float headX = config.W == 1 ? 0.f : head.x / float(config.W - 1);
-    float headY = config.H == 1 ? 0.f : head.y / float(config.H - 1);
+    // Each player retains head/body/tail channels and an ordered-segment channel.
+    // The final channel marks free cells; head-coordinate broadcasts are unnecessary.
+    int freeChannel = CHANNELS_PER_PLAYER * config.N;
+    BoardTensor board(freeChannel + 1, Matrix<float>(config.W, config.H, 0.f));
+    board[freeChannel] = Matrix<float>(config.W, config.H, 1.f);
+    vector<int> players{perspective};
 
-    for (int y = 0; y < config.H; y++)
+    for (int player = 1; player <= config.N; player++)
     {
-        for (int x = 0; x < config.W; x++)
+        if (player != perspective)
         {
-            board[6][y][x] = 1.f;
-            board[7][y][x] = headX;
-            board[8][y][x] = headY;
+            players.push_back(player);
         }
     }
 
-    for (const auto &[id, player] : state.players)
+    for (size_t slot = 0; slot < players.size(); slot++)
     {
-        int offset = id == perspective ? 0 : 3;
+        const auto &player = state.players.at(players[slot]);
+        int offset = CHANNELS_PER_PLAYER * slot;
 
         for (size_t segment = 0; segment < player.snake.size(); segment++)
         {
@@ -58,7 +59,7 @@ BoardTensor Observation::encode(const GameState &state, int perspective) const
                 throw invalid_argument("Snake segment outside the board");
             }
 
-            // A single segment belongs to both channels; opponent channels merge all other players.
+            // A single segment belongs to both the head and tail channels.
             if (segment == 0)
             {
                 board[offset][cell.y][cell.x] = 1.f;
@@ -74,7 +75,9 @@ BoardTensor Observation::encode(const GameState &state, int perspective) const
                 board[offset + 1][cell.y][cell.x] = 1.f;
             }
 
-            board[6][cell.y][cell.x] = 0.f;
+            // Zero means absent; multiplying by board area recovers the one-based segment index.
+            board[offset + 3][cell.y][cell.x] = (segment + 1) / (float(config.W) * config.H);
+            board[freeChannel][cell.y][cell.x] = 0.f;
         }
     }
 

@@ -1,7 +1,7 @@
 /*************************************************************************
 Observation - Encodes a game snapshot as board channels
                              -------------------
-    copyright            : (C) 2025 by Enzo DOS ANJOS
+    copyright            : (C) 2026 by Enzo DOS ANJOS
 *************************************************************************/
 
 //------ Interface of the module <Observation> (file Observation.h) ------
@@ -24,7 +24,7 @@ class Observation {
 //--------------------------------------------------------- Public Methods
     public:
         BoardTensor encode(const GameState &state, int perspective) const;
-        // Contract : Encode [channel][y][x]; retain dead bodies and mark length-one snakes as head and tail.
+        // Contract : Encode [channel][y][x]; use four channels per player plus free cells; own slot first, then ascending opponent IDs.
 };
 
 #endif //OBSERVATION_H

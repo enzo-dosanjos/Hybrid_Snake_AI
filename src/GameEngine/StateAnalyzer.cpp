@@ -22,43 +22,96 @@ using namespace std;
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-vector<float> StateAnalyzer::computeExtraFeatures(const GameState &state, int perspective) const
-// Algorithm : Concatenate spatial, growth, progress and gameplay blocks in the documented schema order
-// Spatial metrics :
-//   For each opponent:
-//     alive
-//     own head → opponent segments: min, max, mean distance
-//     opponent head → own segments: min, max, mean distance
-// growth and size metrics :
-//   growth interval
-//   growth timing
-//   own size
-// game metrics :
-//   game progress
-//   own alive
-//   own history entropy
-//   scheduled player
-// gameplay and aggressivity metrics :
-//   For each opponent:
-//     escape routes
-//     kill-zone proximity
-//     opponent history entropy
+vector<float> StateAnalyzer::computeExtraFeatures(const GameState &state, int perspective,
+                                                 const FeatureSelection &selection) const
+// Algorithm : Encode required state context, then append selected derived features in a fixed order.
+// Required rules and timing :
+//   board width, board height
+//   growth interval, growth phase (round % M)
+//   absolute round, scheduled player, perspective player
+// Required player identities :
+//   Own player first, then opponents in ascending ID order:
+//     player ID, alive flag
+// Optional spatial metrics (distances) :
+//   For each opponent in ascending ID order:
+//     own head → opponent segments: min, max, mean normalized distance
+//     opponent head → own segments: min, max, mean normalized distance
+// Optional size metric (snakeSize) :
+//   own snake length / board area
+// Optional game metric (gameProgress) :
+//   capped elapsed scheduled slots / estimated turn budget
+// Optional gameplay and aggressivity metrics :
+//   For each opponent in ascending ID order:
+//     legal-action count / 4 (mobility)
+//     wall/corner proximity (wallProximity)
+// Disabled groups are omitted; dead opponents retain zeroed optional metric slots.
 {
-    validateGameConfig(state.config);
-    vector<float> features = computeSpatialMetrics(state, perspective);
-    vector<float> growth = computeGrowthSizeMetrics(state, perspective);
-    vector<float> gameplay = computeGameplayMetrics(state, perspective);
+    const auto &config = state.config;
+    validateGameConfig(config);
+    state.players.at(perspective);
 
-    // Models interpret inputs by position, so these blocks must retain the schema order
-    features.insert(features.end(), growth.begin(), growth.end());
-    features.push_back(computeGameProgress(state));
-    features.insert(features.end(), gameplay.begin(), gameplay.end());
+    // Raw context avoids clipping distinct times or losing growth and scheduling information.
+    vector<float> features = {
+        float(config.W), float(config.H), float(config.M), float(state.round % config.M),
+        float(state.round), float(state.currentPlayer), float(perspective)
+    };
+    vector<int> players{perspective};
+
+    for (int player = 1; player <= config.N; player++)
+    {
+        if (player != perspective)
+        {
+            players.push_back(player);
+        }
+    }
+
+    // IDs and alive flags follow the board's own-first slot ordering, including dead snakes.
+    for (int player : players)
+    {
+        features.push_back(float(player));
+        features.push_back(state.players.at(player).playerInfo.alive ? 1.f : 0.f);
+    }
+
+    if (selection.distances)
+    {
+        auto spatial = computeSpatialMetrics(state, perspective);
+        features.insert(features.end(), spatial.begin(), spatial.end());
+    }
+
+    if (selection.snakeSize)
+    {
+        features.push_back(computeGrowthSizeMetrics(state, perspective)[2]);
+    }
+
+    if (selection.gameProgress)
+    {
+        features.push_back(computeGameProgress(state));
+    }
+
+    if (selection.mobility || selection.wallProximity)
+    {
+        auto gameplay = computeGameplayMetrics(state, perspective);
+
+        for (size_t opponent = 0; opponent < gameplay.size(); opponent += 2)
+        {
+            if (selection.mobility)
+            {
+                features.push_back(gameplay[opponent]);
+            }
+
+            if (selection.wallProximity)
+            {
+                features.push_back(gameplay[opponent + 1]);
+            }
+        }
+    }
+
     return features;
 }  //----- end of computeExtraFeatures
 
 
 vector<float> StateAnalyzer::computeSpatialMetrics(const GameState &state, int perspective) const
-// Algorithm : Visit opponent IDs in order and retain seven zero values for every dead opponent
+// Algorithm : Visit opponent IDs in order and retain six zero values for every dead opponent
 {
     const auto &own = state.players.at(perspective);
     const auto &config = state.config;
@@ -85,8 +138,8 @@ vector<float> StateAnalyzer::computeSpatialMetrics(const GameState &state, int p
 
         if (!opponent.playerInfo.alive)
         {
-            // Retain the alive flag and six distance slots after an opponent dies
-            features.insert(features.end(), 7, 0.f);
+            // Retain the six distance slots after an opponent dies
+            features.insert(features.end(), 6, 0.f);
             continue;
         }
 
@@ -99,7 +152,6 @@ vector<float> StateAnalyzer::computeSpatialMetrics(const GameState &state, int p
         // Each target snake includes all segments, including its head and tail
         auto toOpponent = distanceMetrics(own.snake.front(), opponent.snake, maxDistance);
         auto toOwn = distanceMetrics(opponent.snake.front(), own.snake, maxDistance);
-        features.push_back(1.f);
         features.insert(features.end(), toOpponent.begin(), toOpponent.end());
         features.insert(features.end(), toOwn.begin(), toOwn.end());
     }
@@ -147,27 +199,11 @@ float StateAnalyzer::computeGameProgress(const GameState &state) const
 
 
 vector<float> StateAnalyzer::computeGameplayMetrics(const GameState &state, int perspective) const
-// Algorithm : Encode own status and turn context, then ordered opponent mobility, wall proximity and history
+// Algorithm : Encode ordered opponent mobility and wall proximity without dependence on move history
 {
     const auto &config = state.config;
     validateGameConfig(config);
-    const auto &own = state.players.at(perspective);
-    auto history = state.lastMoves.find(perspective);
-    float entropy = 0.f;
-
-    // Dead players and missing histories contribute zero movement entropy
-    // Entropy is already in [0, 1]; tanh compresses it to [0, tanh(1)]
-    if (own.playerInfo.alive && history != state.lastMoves.end())
-    {
-        entropy = tanh(computeActionEntropy(history->second));
-    }
-
-    // Encode the absolute scheduled ID in [0, 1], avoiding division by zero for N = 1
-    vector<float> features = {
-        own.playerInfo.alive ? 1.f : 0.f,
-        entropy,
-        config.N == 1 ? 0.f : (state.currentPlayer - 1) / float(config.N - 1)
-    };
+    vector<float> features;
 
     for (int player = 1; player <= config.N; player++)
     {
@@ -181,7 +217,7 @@ vector<float> StateAnalyzer::computeGameplayMetrics(const GameState &state, int 
         if (!opponent.playerInfo.alive)
         {
             // Keep the same opponent slots as the spatial block, even after death
-            features.insert(features.end(), 3, 0.f);
+            features.insert(features.end(), 2, 0.f);
             continue;
         }
 
@@ -190,66 +226,30 @@ vector<float> StateAnalyzer::computeGameplayMetrics(const GameState &state, int 
             throw invalid_argument("Cannot analyze an empty snake");
         }
 
-        // Use this opponent's history rather than reusing the perspective player's moves
-        history = state.lastMoves.find(player);
-        entropy = history == state.lastMoves.end() ? 0.f : tanh(computeActionEntropy(history->second));
         // Mobility is the fraction of the four directions currently legal for this opponent
         features.push_back(opponent.playerInfo.actionMask.count() / 4.f);
         features.push_back(computeKillZoneProximity(opponent.snake.front(), config));
-        features.push_back(entropy);
     }
 
     return features;
 }  //----- end of computeGameplayMetrics
 
 
-int StateAnalyzer::getFeatureCount(int numPlayers)
-// Algorithm : Add seven global values to the ten retained values per opponent
+int StateAnalyzer::getFeatureCount(int numPlayers, const FeatureSelection &selection)
+// Algorithm : Count required context and the enabled derived feature groups
 {
     if (numPlayers < 1)
     {
         throw invalid_argument("Feature count requires at least one player");
     }
 
-    // Seven shared values plus seven spatial and three gameplay values per opponent
-    return 7 + 10 * (numPlayers - 1);
+    int opponents = numPlayers - 1;
+    return 7 + 2*numPlayers + 6*opponents*selection.distances + selection.snakeSize +
+           selection.gameProgress + opponents*(selection.mobility + selection.wallProximity);
 }  //----- end of getFeatureCount
 
 
 //---------------------------------------------------------------- PRIVATE
-float StateAnalyzer::computeActionEntropy(const deque<Action> &moves) const
-// Algorithm : Count the four actions and normalize Shannon entropy by its two-bit maximum
-{
-    if (moves.empty())
-    {
-        return 0.f;
-    }
-
-    // Only action frequencies matter here; entropy does not preserve movement order
-    array<int, 4> counts{};
-
-    for (Action move : moves)
-    {
-        counts.at(static_cast<size_t>(move))++;
-    }
-
-    float entropy = 0.f;
-
-    for (int count : counts)
-    {
-        // An absent action contributes zero; skip it to avoid evaluating log2(0)
-        if (count > 0)
-        {
-            float probability = count / float(moves.size());
-            entropy -= probability * log2(probability);
-        }
-    }
-
-    // Four equally frequent actions give log2(4) = 2 bits; one repeated action gives zero
-    return entropy / 2.f;
-}  //----- end of computeActionEntropy
-
-
 float StateAnalyzer::computeKillZoneProximity(Coord head, const GameConfig &config) const
 // Algorithm : Average symmetric outer-quarter edge weights with normalized nearest-wall proximity
 {

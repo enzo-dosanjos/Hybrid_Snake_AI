@@ -148,13 +148,26 @@ struct Transition {
     bool done = false;
 };
 
-constexpr int EXTRA_FEATURE_SCHEMA_VERSION = 1;  // Alows to identify which layout and meaning of extra features a model expects
+constexpr int EXTRA_FEATURE_SCHEMA_VERSION = 2;
+constexpr int OBSERVATION_SCHEMA_VERSION = 2;
+
+// Optional derived inputs; required geometry, identities and timing are never disabled.
+struct FeatureSelection {
+    bool distances = true;
+    bool snakeSize = true;
+    bool gameProgress = true;
+    bool mobility = true;
+    bool wallProximity = true;
+};
+
 
 struct ModelConfig {
     int numPlayers = 2;
     int featureSchemaVersion = EXTRA_FEATURE_SCHEMA_VERSION;
-    // Set from StateAnalyzer::getFeatureCount(numPlayers) when constructing a model.
+    // Set from StateAnalyzer::getFeatureCount(numPlayers, features) when constructing a model.
     int extraFeatureCount = 0;
+    FeatureSelection features;
+    int observationSchemaVersion = OBSERVATION_SCHEMA_VERSION;
     int replayCapacity = 100000;
     float gamma = 0.99f;
     float epsilon = 1.f;
@@ -179,6 +192,6 @@ const std::array<std::string, 4> ACTIONS = {
 };
 
 constexpr std::size_t ACTION_HISTORY_SIZE = 5;
-constexpr std::size_t BOARD_CHANNELS = 9;
+constexpr std::size_t CHANNELS_PER_PLAYER = 4;
 
 #endif //STRUCTS_H

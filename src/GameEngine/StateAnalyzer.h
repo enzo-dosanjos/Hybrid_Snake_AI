@@ -24,11 +24,12 @@ StateAnalyzer - Computes stable features from game snapshots
 class StateAnalyzer {
 //--------------------------------------------------------- Public Methods
     public:
-        std::vector<float> computeExtraFeatures(const GameState &state, int perspective) const;
-        // Contract : Return schema version 1 features; opponent slots follow ascending IDs excluding perspective
+        std::vector<float> computeExtraFeatures(const GameState &state, int perspective,
+                                                const FeatureSelection &selection = {}) const;
+        // Contract : Return schema version 2 features; opponent slots follow ascending IDs excluding perspective
 
         std::vector<float> computeSpatialMetrics(const GameState &state, int perspective) const;
-        // Contract : Each opponent contributes alive, then min/max/average distances in both directions
+        // Contract : Each opponent contributes min/max/average distances in both directions
 
         std::vector<float> computeGrowthSizeMetrics(const GameState &state, int perspective) const;
         // Contract : Return growth period / 10, fraction of rounds until growth and own occupied fraction
@@ -37,16 +38,13 @@ class StateAnalyzer {
         // Contract : Return the original capped turn-budget heuristic, not a terminal-state test
 
         std::vector<float> computeGameplayMetrics(const GameState &state, int perspective) const;
-        // Contract : Return own alive/entropy and scheduled ID, then opponent escape/wall/entropy triples
+        // Contract : Return opponent escape and wall-proximity pairs in ascending ID order
 
-        static int getFeatureCount(int numPlayers);
-        // Contract : Return 7 + 10*(N - 1) for a positive fixed player count
+        static int getFeatureCount(int numPlayers, const FeatureSelection &selection = {});
+        // Contract : Return required context plus the selected derived features for a fixed player count
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        float computeActionEntropy(const std::deque<Action> &moves) const;
-        // Contract : Return Shannon entropy divided by two; empty and single-action histories return zero
-
         float computeKillZoneProximity(Coord head, const GameConfig &config) const;
         // Contract : Combine proximity to outer-quarter edges and the nearest wall, symmetrically
 

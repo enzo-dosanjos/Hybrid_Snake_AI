@@ -25,9 +25,8 @@ void checkObservation(const GameState &state, int perspective)
     auto board = Observation{}.encode(state, perspective);
     int width = state.config.W;
     int height = state.config.H;
-    Coord head = state.players.at(perspective).snake.front();
 
-    check(board.size() == 9, "Wrong channel count");
+    check(board.size() == static_cast<size_t>(4*state.config.N + 1), "Wrong channel count");
 
     for (const auto &channel : board)
     {
@@ -43,18 +42,35 @@ void checkObservation(const GameState &state, int perspective)
     {
         for (int x = 0; x < width; x++)
         {
-            float expected[9] = {0};
+            vector<float> expected(4*state.config.N + 1, 0.f);
             Coord cell{x, y};
 
             for (const auto &[id, player] : state.players)
             {
-                int offset = id == perspective ? 0 : 3;
+                // Slot zero is own; other slots count smaller opponent IDs.
+                int slot = 0;
+
+                if (id != perspective)
+                {
+                    slot = 1;
+
+                    for (int other = 1; other < id; other++)
+                    {
+                        if (other != perspective)
+                        {
+                            slot++;
+                        }
+                    }
+                }
+
+                int offset = 4*slot;
 
                 for (size_t segment = 0; segment < player.snake.size(); segment++)
                 {
                     if (player.snake[segment] == cell)
                     {
-                        // A length-one snake is both head and tail; opponent presence is merged across players.
+                        // A length-one snake is both head and tail; opponents retain separate slots.
+                        expected[offset + 3] = float(segment + 1) / (width * height);
                         expected[offset] = max(expected[offset], segment == 0 ? 1.f : 0.f);
                         expected[offset + 2] = max(expected[offset + 2],
                                                   segment + 1 == player.snake.size() ? 1.f : 0.f);
@@ -67,11 +83,9 @@ void checkObservation(const GameState &state, int perspective)
                 }
             }
 
-            expected[6] = occupied(state, cell) ? 0.f : 1.f;
-            expected[7] = width == 1 ? 0.f : head.x / float(width - 1);
-            expected[8] = height == 1 ? 0.f : head.y / float(height - 1);
+            expected[4*state.config.N] = occupied(state, cell) ? 0.f : 1.f;
 
-            for (int channel = 0; channel < 9; channel++)
+            for (size_t channel = 0; channel < expected.size(); channel++)
             {
                 checkNear(board[channel][y][x], expected[channel],
                           "Channel " + to_string(channel) + " at (" +
@@ -146,7 +160,7 @@ void testSnapshotEncoding()
 
 
 void testDeadBodyAndSingleCell()
-// Algorithm : Tests retained dead-body channels and finite head coordinates on a one-cell board.
+// Algorithm : Tests retained dead-body channels and segment order on a one-cell board.
 {
     GameEngine engine({5, 4, 2, 3, 1}, {{0, 0}, {0, 0}, {4, 3}, {4, 0}});
     engine.playerDied(2);
@@ -158,10 +172,60 @@ void testDeadBodyAndSingleCell()
 }  //----- end of testDeadBodyAndSingleCell
 
 
+void testSegmentReconstruction()
+// Algorithm : Reconstructs each ordered snake from its rank channel and checks retained identities across perspectives.
+{
+    GameEngine engine({5, 4, 3, 3, 1}, {{0, 0}, {0, 0}, {4, 3}, {4, 0}});
+    auto state = engine.getState();
+    state.players.at(1).snake = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    state.players.at(2).snake = {{4, 3}, {3, 3}, {3, 2}};
+    state.players.at(2).playerInfo.alive = false;
+
+    for (int perspective = 1; perspective <= 3; perspective++)
+    {
+        auto board = Observation{}.encode(state, perspective);
+        vector<int> ids{perspective};
+
+        for (int id = 1; id <= 3; id++)
+        {
+            if (id != perspective)
+            {
+                ids.push_back(id);
+            }
+        }
+
+        for (size_t slot = 0; slot < ids.size(); slot++)
+        {
+            const auto &snake = state.players.at(ids[slot]).snake;
+            deque<Coord> recovered(snake.size());
+            int count = 0;
+
+            for (int y = 0; y < 4; y++)
+            {
+                for (int x = 0; x < 5; x++)
+                {
+                    int rank = lround(board[4*slot + 3][y][x] * 20);
+
+                    if (rank > 0)
+                    {
+                        check(rank <= static_cast<int>(snake.size()), "Segment rank outside snake");
+                        recovered[rank - 1] = {x, y};
+                        count++;
+                    }
+                }
+            }
+
+            check(count == static_cast<int>(snake.size()) && recovered == snake, "Ordered snake was not recoverable");
+        }
+    }
+}  //----- end of testSegmentReconstruction
+
+
 vector<TestCase> getTests()
 // Algorithm : Registers this component’s named test functions for independent selection and execution.
 {
     return {
+        {"segment_reconstruction", testSegmentReconstruction},
         {"shapes_and_perspectives", testShapesAndPerspectives},
         {"body_and_tail_channels", testBodyAndTailChannels},
         {"growth_and_tail_release", testGrowthAndTailRelease},

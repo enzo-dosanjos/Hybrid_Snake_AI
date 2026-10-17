@@ -39,7 +39,7 @@ The project implements a combination of 2 AI approaches in C++ without using any
   - Temporal-spatial risk assessment to evaluate movement dangers.
 
 - **Sophisticated Reward System:**
-  - Rewards based on space control, kill zone detection, and anti-passivity.
+  - Legacy rewards based on outcomes, survival and opponent constraints; integration is being refactored.
   - Tailored metrics that adjust for board size and dynamic game scenarios.
 
 - **Robust Training & Validation Tools:**
@@ -175,59 +175,101 @@ player. Legal-action masks come from the engine snapshot.
 
 ### Board State
 
-Layout is `[channel][y][x]`, with nine channels:
+Layout is `[channel][y][x]`, with **4*N + 1 channels**.
+Player slot zero is the perspective player. The remaining slots follow ascending
+player ID, excluding that player. Each player keeps its own channels, including
+when dead.
 
-| Channel | Value |
+| Channel within player slot `k` | Value |
 | --- | --- |
-| 0, 1, 2 | Perspective player's head, interior body and tail |
-| 3, 4, 5 | All opponents' heads, interior bodies and tails |
-| 6 | Unoccupied cell (not reachability) |
-| 7 | Perspective head x / (W - 1), broadcast to all cells |
-| 8 | Perspective head y / (H - 1), broadcast to all cells |
+| `4*k` | Head |
+| `4*k + 1` | Interior body |
+| `4*k + 2` | Tail |
+| `4*k + 3` | Segment order: `(index from head + 1) / (W*H)`; zero for absent cells |
+| Final channel `4*N` | Unoccupied cell (not reachability) |
 
-A one-segment snake is both head and tail. Dead snakes retain their occupied
-channels. Coordinate channels are zero when the corresponding dimension is one.
+A one-segment snake is both head and tail. Segment order preserves the complete
+snake path, including which segment becomes the next tail. Dead bodies remain
+occupied. The normalized head-coordinate channels have been removed.
 
 ### Extracted Features
 
-A fixed player count produces
-`StateAnalyzer::getFeatureCount(N) = 7 + 10*(N - 1)` values, independent of board
-size, insertion order and deaths. Opponent slots always follow ascending player
-ID with the perspective player omitted.
-
-Concatenate these blocks in order:
+Extra-feature schema 2 has a **required prefix**, followed by optional derived
+features. The required prefix cannot be disabled through `FeatureSelection`:
 
 | Block | Values, in order | Size |
 | --- | --- | --- |
-| Spatial, one block per opponent | Alive flag; own head to opponent segments: min, max, average distance; opponent head to own segments: min, max, average distance | 7*(N - 1) |
-| Growth and size | M / 10; rounds until growth / M; own snake length / (W*H) | 3 |
-| Progress | Capped elapsed scheduled slots / heuristic turn budget | 1 |
-| Own status and schedule | Own alive flag; tanh(own normalized action entropy); (currentPlayer - 1) / (N - 1) | 3 |
-| Opponent gameplay, one block per opponent | Legal-action count / 4; wall/corner proximity; tanh(normalized action entropy) | 3*(N - 1) |
+| Rules and time | W, H, M, round % M, absolute round, currentPlayer, perspective | 7 |
+| Player slots | Player ID, alive flag, in the same own-first order as board channels | 2*N |
 
-For N=1, scheduled-player encoding is zero and opponent blocks are empty.
-Both blocks for a dead opponent are entirely zero, including history metrics.
-Its body still appears in the board tensor and blocks engine-calculated legal
-moves. Changing a dead body's coordinates in a synthetic snapshot without
-recomputing legal masks does not update those derived masks.
+Rules, IDs and time are supplied as raw numerical values, without clipping.
+This preserves distinctions between late rounds even after the optional progress
+estimate saturates. Player count is fixed per model and recoverable from its
+layout. Dead players retain their ID and have alive = 0.
 
-### Formulas and Conventions
+Optional groups are appended in this order:
 
-- Distances retain the original Euclidean normalization `sqrt(W*W + H*H)` and
-  include all stored segments (head and tail included).
-- Growth uses the authoritative round, including dead-player slots. Rounds until
-  growth are `(M - round % M) % M`: zero means the current round grows.
-  `M / 10` retains the original scaling and can exceed one when M > 10.
-- Elapsed slots are `round*N + currentPlayer - 1`. The original turn-budget
-  heuristic is `W*H*M`, multiplied by 0.8 when M > 1. Progress is clamped to
-  `[0,1]`; it does not determine termination or promise a maximum game duration.
-- Entropy is `-sum(p*log2(p))/2`, giving zero for empty/repeated histories and one
-  for equally distributed actions. Features retain the original `tanh` transform.
-  Missing histories encode zero; engine histories hold the last five moves.
-  Own history is zero when the perspective player is dead.
+| Selection flag | Values | Size |
+| --- | --- | --- |
+| `distances` | Per opponent: own head to opponent segments min/max/mean, then opponent head to own segments min/max/mean | 6*(N - 1) |
+| `snakeSize` | Own snake length / (W*H) | 1 |
+| `gameProgress` | Capped elapsed scheduled slots / heuristic turn budget | 1 |
+| `mobility`, `wallProximity` | Per opponent: enabled legal-action count / 4, then enabled wall/corner proximity | Up to 2*(N - 1) |
+
+Opponent metrics follow ascending ID excluding the perspective player; dead
+opponents retain zero-filled metric slots. With every group enabled there are
+`10*N + 1` values: **21 for two players**. With all groups disabled only the
+`7 + 2*N` required values remain. Use
+`StateAnalyzer::getFeatureCount(N, selection)` rather than a hard-coded size.
+
+### Comparing Feature Groups
+
+Use the same selection for every observation supplied to a model:
+
+```cpp
+FeatureSelection selection;
+selection.distances = false;
+selection.wallProximity = false;
+
+auto features = analyzer.computeExtraFeatures(state, perspective, selection);
+int featureCount = StateAnalyzer::getFeatureCount(state.config.N, selection);
+
+ModelConfig config;
+config.numPlayers = state.config.N;
+config.features = selection;
+config.extraFeatureCount = featureCount;
+```
+
+All flags default to true. To test only required inputs, use
+`FeatureSelection{false, false, false, false, false}`. The flags select groups,
+not individual distance statistics. Changing selection changes input positions
+and potentially their count: train a separate model for each selection. Compare
+runs using the same opponents, boards, evaluation conditions and training budget.
+
+### Formulas and State Sufficiency
+
+- Distances retain Euclidean normalization `sqrt(W*W + H*H)` and include all
+  stored segments, including head and tail.
+- Growth uses the authoritative round and the fixed player schedule, including
+  dead slots. `round % M == 0` identifies a growth round.
+- Elapsed slots are `round*N + currentPlayer - 1`. The optional progress heuristic
+  uses `W*H*M`, multiplied by 0.8 when M > 1, and clamps the ratio to `[0,1]`.
+  It does not determine termination or replace the required absolute round.
 - Wall/corner proximity adds 0.5 for each axis within its outer quarter, then
-  averages that weight with `1 - nearestWallDistance/(max(W,H)/2)`.
-  Edge checks are symmetric and the result is clamped to `[0,1]`.
+  averages that weight with `1 - nearestWallDistance/(max(W,H)/2)` and clamps to
+  `[0,1]`.
+- Action histories remain in engine snapshots for diagnostics but are no longer
+  model features. The legacy reward entropy penalty and running reward statistics
+  have been removed, as has the unused hybrid-policy history parameter.
+
+For valid engine snapshots and ordinary supported board sizes, these inputs
+retain the geometry, identities and timing needed for game transitions.
+
+### Mention on markov state
+Since the opponent’s identity is hidden, the board alone does not necessarily
+contain all the information useful for predicting its next action. That makes
+the learner’s problem partially observable. This is the only limit for the state
+to be markov.
 
 ---
 
