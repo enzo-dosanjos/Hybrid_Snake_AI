@@ -19,22 +19,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+      - name: Build executables
+        run: make all
       - name: Run component suites
         run: make test
-
-  # todo: remove after refactoring
-  checkpoints:
-    name: Checkpoint ${{ matrix.checkpoint }}
-    if: github.ref == 'refs/heads/refactoring' || github.head_ref == 'refactoring' || github.base_ref == 'refactoring'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        checkpoint: [1, 2, 3]
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - name: Run checkpoint suites
-        run: make test TEST="--checkpoint ${{ matrix.checkpoint }}"

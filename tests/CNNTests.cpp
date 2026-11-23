@@ -20,11 +20,10 @@ using namespace std;
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-Matrix<vector<float>> makeInput(int channels, int height, int width)
+FeatureTensor makeInput(int channels, int height, int width)
 // Algorithm : Builds deterministic channel and spatial variations so tensor indexing errors affect the expected values.
 {
-    Matrix<vector<float>> input;
-    input.resize(channels, vector<vector<float>>(height, vector<float>(width)));
+    FeatureTensor input(channels, Matrix<float>(width, height));
 
     for (int channel = 0; channel < channels; channel++)
     {
@@ -41,16 +40,15 @@ Matrix<vector<float>> makeInput(int channels, int height, int width)
 }  //----- end of makeInput
 
 
-Matrix<vector<float>> referenceForward(const vector<ConvolutionalLayer> &layers,
-                                      Matrix<vector<float>> input)
+FeatureTensor referenceForward(const vector<ConvolutionalLayer> &layers,
+                               FeatureTensor input)
 // Algorithm : Computes independent convolution outputs directly from layer values without calling production convolution.
 {
     for (const auto &layer : layers)
     {
         int height = (input[0].size() + 2*layer.padding - layer.kernelSize) / layer.stride + 1;
         int width = (input[0][0].size() + 2*layer.padding - layer.kernelSize) / layer.stride + 1;
-        Matrix<vector<float>> output;
-        output.resize(layer.outputChannels, vector<vector<float>>(height, vector<float>(width)));
+        FeatureTensor output(layer.outputChannels, Matrix<float>(width, height));
 
         for (int out = 0; out < layer.outputChannels; out++)
         {
@@ -92,7 +90,7 @@ Matrix<vector<float>> referenceForward(const vector<ConvolutionalLayer> &layers,
 }  //----- end of referenceForward
 
 
-float referenceLoss(const vector<ConvolutionalLayer> &layers, const Matrix<vector<float>> &input)
+float referenceLoss(const vector<ConvolutionalLayer> &layers, const FeatureTensor &input)
 // Algorithm : Computes the summed half-squared error of reference outputs against a constant target of 0.7.
 {
     auto output = referenceForward(layers, input);
@@ -113,7 +111,7 @@ float referenceLoss(const vector<ConvolutionalLayer> &layers, const Matrix<vecto
 }  //----- end of referenceLoss
 
 
-void checkTensor(const Matrix<vector<float>> &actual, const Matrix<vector<float>> &expected)
+void checkTensor(const FeatureTensor &actual, const FeatureTensor &expected)
 // Algorithm : Checks tensor dimensions and each output value against the independent reference tensor.
 {
     check(actual.size() == expected.size(), "Channel count differs");
@@ -138,18 +136,19 @@ void checkTensor(const Matrix<vector<float>> &actual, const Matrix<vector<float>
 void testConvolutionShapes()
 // Algorithm : Tests multi-channel convolution against reference values on rectangular inputs with varied padding and stride.
 {
+    CNN network(2, mt19937(42));
     for (int padding : {0, 1})
     {
         for (int stride : {1, 2})
         {
-            CNN network(2, mt19937(42));
-            int height = (5 + 2*padding - 3) / stride + 1;
-            int width = (7 + 2*padding - 3) / stride + 1;
-            network.addLayer("ReLU", 3, stride, padding, 3, {height, width}, 2);
-            auto input = makeInput(2, 5, 7);
-            auto expected = referenceForward(network.getNN(), input);
-
-            checkTensor(network.forwardPropagation(input), expected);
+            network.clearNN();
+            network.addLayer({"ReLU", 3, stride, padding, 3});
+            for (auto shape : vector<pair<int, int>>{{5, 7}, {4, 3}})
+            {
+                auto input = makeInput(2, shape.first, shape.second);
+                auto expected = referenceForward(network.getNN(), input);
+                checkTensor(network.forwardPropagation(input), expected);
+            }
         }
     }
 }  //----- end of testConvolutionShapes
@@ -166,6 +165,19 @@ void testPooling()
             auto output = CNN::globalAvgPooling(input);
             check(output.size() == static_cast<size_t>(channels), "Pooling changed channel count");
 
+            vector<float> pooledGradient(channels);
+            FeatureTensor expectedGradient(channels, Matrix<float>(shape.second, shape.first));
+            for (int channel = 0; channel < channels; channel++)
+            {
+                pooledGradient[channel] = (channel % 2 == 0 ? 1.f : -1.f) * (channel + 1);
+                for (auto &row : expectedGradient[channel])
+                {
+                    fill(row.begin(), row.end(), pooledGradient[channel] / (shape.first*shape.second));
+                }
+            }
+
+            checkTensor(CNN::globalAvgPoolingBackward(pooledGradient, input), expectedGradient);
+
             for (int channel = 0; channel < channels; channel++)
             {
                 float expected = 0.2f * (1 + channel + (shape.first - 1) - (shape.second - 1)/2.f);
@@ -181,8 +193,8 @@ void testNumericalGradients()
 {
     // This seed and the input below keep the final ReLU active, away from its nondifferentiable boundary.
     CNN network(2, mt19937(4));
-    network.addLayer("ReLU", 2, 1, 0, 2, {3, 4}, 2);
-    network.addLayer("ReLU", 1, 1, 0, 1, {3, 4}, 2);
+    network.addLayer({"ReLU", 2, 1, 0, 2});
+    network.addLayer({"ReLU", 1, 1, 0, 1});
     auto input = makeInput(2, 4, 5);
 
     for (int channel = 0; channel < 2; channel++)
@@ -222,7 +234,7 @@ void testNumericalGradients()
 
     network.resetGradients();
     network.backPropagation(error);
-    network.accumulateGradient();
+    network.accumulateGradients();
     auto layers = network.getNN();
     const float step = 1e-4f;
     float totalGradient = 0.f;
@@ -289,16 +301,123 @@ void testNumericalGradients()
 }  //----- end of testNumericalGradients
 
 
+float referencePooledLoss(const vector<ConvolutionalLayer> &layers, const vector<BoardTensor> &inputs)
+// Algorithm : Sum half-squared errors on the mean of each sample's independently convolved feature map.
+{
+    float total = 0.f;
+    for (const auto &input : inputs)
+    {
+        auto output = referenceForward(layers, input);
+        float sum = 0.f;
+        for (const auto &row : output[0])
+        {
+            for (float value : row)
+            {
+                sum += value;
+            }
+        }
+
+        float residual = sum / (output[0].size()*output[0][0].size()) - 0.7f;
+        total += 0.5f * residual * residual;
+    }
+
+    return total;
+}  //----- end of referencePooledLoss
+
+
+void testPooledBatchUpdate()
+// Algorithm : Checks a batched CNN update against numerical derivatives of an independently pooled reference loss.
+{
+    CNN network(1, mt19937(42));
+    network.addLayer({"ReLU", 1, 1, 0, 2});
+    network.addLayer({"linear", 2, 2, 1, 1});
+    NeuralNetwork &batch = network;
+    vector<BoardTensor> inputs{makeInput(1, 3, 5), makeInput(1, 4, 2)};
+    auto before = network.getNN();
+
+    batch.resetGradients();
+    for (const auto &input : inputs)
+    {
+        auto output = network.forwardPropagation(input);
+        auto pooled = CNN::globalAvgPooling(output);
+        network.backPropagation(CNN::globalAvgPoolingBackward({pooled[0] - 0.7f}, output));
+        batch.accumulateGradients();
+    }
+
+    const float learningRate = 0.05f;
+    batch.updateWeights(learningRate);
+    auto after = network.getNN();
+    check(referencePooledLoss(after, inputs) < referencePooledLoss(before, inputs),
+          "Pooled batch update did not reduce the reference loss");
+
+    const float step = 1e-3f;
+    for (size_t index = 0; index < before.size(); index++)
+    {
+        const auto &layer = before[index];
+        for (int in = 0; in < layer.inputChannels; in++)
+        {
+            for (int out = 0; out < layer.outputChannels; out++)
+            {
+                for (int y = 0; y < layer.kernelSize; y++)
+                {
+                    for (int x = 0; x < layer.kernelSize; x++)
+                    {
+                        // Perturb one weight to estimate the derivative of the total batch loss.
+                        auto plus = before;
+                        auto minus = before;
+                        plus[index].weights[in][out][y][x] += step;
+                        minus[index].weights[in][out][y][x] -= step;
+                        float expected = (referencePooledLoss(plus, inputs) -
+                                          referencePooledLoss(minus, inputs)) / (2*step);
+                        float actual = (layer.weights[in][out][y][x] - after[index].weights[in][out][y][x]) /
+                                       learningRate;
+                        checkNear(actual, expected, "Pooled batch kernel update", 0.0002f, 0.02f);
+                    }
+                }
+            }
+        }
+    }
+}  //----- end of testPooledBatchUpdate
+
+
+void testOutputReluGradient()
+// Algorithm : Tests output ReLU gating with equal input magnitudes on opposite sides of zero.
+{
+    CNN network(1, mt19937(42));
+    network.addLayer({"ReLU", 1, 1, 0, 1});
+    BoardTensor input(1, Matrix<float>(2, 1));
+    float sign = network.getNN()[0].weights[0][0][0][0] > 0.f ? 1.f : -1.f;
+    input[0][0] = {-sign, sign};
+
+    network.forwardPropagation(input);
+    network.backPropagation(FeatureTensor(1, Matrix<float>(2, 1, 1.f)));
+    network.accumulateGradients();
+    const auto layer = network.getNN()[0];
+    checkNear(layer.biasGradient[0], 1.f, "Only the positive output contributes to the bias gradient");
+    checkNear(layer.weightGradient[0][0][0][0], sign, "Only the positive output contributes to the kernel gradient");
+}  //----- end of testOutputReluGradient
+
+
 void testWeightCopy()
-// Algorithm : Tests weight copying by comparing outputs of differently seeded networks after copying their parameters.
+// Algorithm : Checks that copying trained parameters matches predictions and leaves the target's batch gradients alone.
 {
     CNN first(2, mt19937(42));
     CNN second(2, mt19937(99));
-    first.addLayer("ReLU", 1, 1, 0, 2, {3, 5}, 2);
-    second.addLayer("ReLU", 1, 1, 0, 2, {3, 5}, 2);
+    first.addLayer({"linear", 1, 1, 0, 2});
+    second.addLayer({"linear", 1, 1, 0, 2});
     auto input = makeInput(2, 3, 5);
+    first.forwardPropagation(input);
+    first.backPropagation(FeatureTensor(2, Matrix<float>(5, 3, 1.f)));
+    first.accumulateGradients();
+    first.updateWeights(0.01f);
+    auto expected = first.forwardPropagation(input);
+
     second.copyWeights(first);
-    checkTensor(first.forwardPropagation(input), second.forwardPropagation(input));
+    checkTensor(second.forwardPropagation(input), expected);
+
+    first.updateWeights(0.01f);
+    second.updateWeights(0.01f);
+    checkTensor(second.forwardPropagation(input), expected);
 }  //----- end of testWeightCopy
 
 
@@ -309,6 +428,8 @@ vector<TestCase> getTests()
         {"convolution_shapes", testConvolutionShapes},
         {"pooling", testPooling},
         {"numerical_gradients", testNumericalGradients},
+        {"pooled_batch_update", testPooledBatchUpdate},
+        {"output_relu_gradient", testOutputReluGradient},
         {"weight_copy", testWeightCopy}
     };
 }  //----- end of getTests

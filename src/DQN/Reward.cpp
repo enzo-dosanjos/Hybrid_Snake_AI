@@ -1,5 +1,5 @@
 /*************************************************************************
-Reward - utility functions for
+Reward - Scores the interval between learner decisions
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -8,97 +8,111 @@ Reward - utility functions for
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
-#include <iostream>
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+#include <stdexcept>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
-#include "../include/Reward.h"
-
+#include "Reward.h"
+#include "../Utils.h"
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-float Reward::computeReward(const vector<float> &boardState, const vector<float> &extraState,  // todo: split into methods for each rewards
-                          const vector<float> &prevExtraState, const PlayersData &playerState,
-                          int playerNum, int turn, bool isTerminalState, bool isAlive)
-// Algorithm : Compute the mono-objective reward for a given state
+NNRewards::NNRewards(int W, int H)
+    : winningMove(2.f * W * H),
+      losingMove(-winningMove),
+      killingSetupMove(15.f * sqrt(float(W) * H)),
+      killZoneEnterMove(6.f * sqrt(float(W) * H)),
+      escapeReductionMove(2.4f * sqrt(float(W) * H)),
+      survivingMove(0.1f * sqrt(float(W) * H))
+// Algorithm : Scale outcome rewards by area and shaping rewards by its square root.
 {
-    // - If my snake's head collides with a border or its own body, return negative lot
-    // - If the opponent's snake head collides, return a positive lot
-    // - Otherwise, return a small positive reward for survival
-    float score = 0.0;
+}  //----- end of NNRewards
 
-    float winningMove =  rewards.winningMove * (1.0 + turn/static_cast<float>(maxTurns));  // Scale the winning reward with the turn number, so it is more rewarding in the late game
-    float losingMove =  rewards.losingMove * (0.2 + 0.8*pow(turn/static_cast<float>(maxTurns), 2));  // Curve the penalty for losing, so it is less severe in the early game
 
-    if (isAlive && isTerminalState)
+Reward::Reward(const GameConfig &p_config)
+    : config(p_config), rewards(config.W, config.H)
+// Algorithm : Validate the game rules that determine the reward scales.
+{
+    validateGameConfig(config);
+}  //----- end of Reward
+
+
+float Reward::computeReward(const GameState &previous, const GameState &next, int player) const
+// Algorithm : Score terminal outcomes first, then observed eliminations and continuing play.
+{
+    if (!(previous.config == config) || !(next.config == config))
     {
-            score += winningMove;
+        throw invalid_argument("Reward snapshots must match the game configuration");
     }
-    else if (isTerminalState)
+
+    const auto &learner = next.players.at(player);
+
+    // Scale outcomes by elapsed scheduled slots, including dead slots, against the legacy turn budget.
+    float maxTurns = float(config.W) * config.H * config.M;
+    if (config.M > 1)
     {
-        score += losingMove;
+        maxTurns *= 0.8f;
     }
-    else
+
+    float elapsed = float(next.round) * config.N + next.currentPlayer - 1;
+    float progress = elapsed / maxTurns;
+    float win = rewards.winningMove * (1.f + progress);
+    float loss = rewards.losingMove * (0.2f + 0.8f * progress * progress);
+
+    if (!learner.playerInfo.alive)
     {
-        for (const auto &player : playerState)
+        return loss;
+    }
+
+    int opponentsAlive = 0;
+    int opponentsEliminated = 0;
+    for (const auto &[opponent, current] : next.players)
+    {
+        if (opponent != player)
         {
-            if (player.first != playerNum)
-            {
-                if (!gameEngine.isAlive(playerState, boardState, player.first))
-                {
-                    score += winningMove;
-                }
-            }
+            opponentsAlive += current.playerInfo.alive;
+            opponentsEliminated += previous.players.at(opponent).playerInfo.alive &&
+                                   !current.playerInfo.alive;
         }
     }
 
-    if (oppWillDie || oppDied)  // todo: check if it's my ai that killed the opp (works in 1v1)
+    // A sole survivor wins even if its mask is empty. The win absorbs the final elimination.
+    if (opponentsAlive == 0)
     {
-        score += winningMove;
+        return win;
     }
 
-    score += rewards.killingSetupMove * nbOppKillSetup;
-
-    const int nbOpp = (gameEngine.getPlayers().size()-1);
-    const int ESCAPE_ROUTES_INDEX = 6*nbOpp + 3;
-    const int KILL_ZONE_INDEX = ESCAPE_ROUTES_INDEX + nbOpp;
-    const int PHASE_INDEX = KILL_ZONE_INDEX + nbOpp;
-    const int ENTROPY_INDEX = PHASE_INDEX + 1;
-
-    // Aggression rewards
-    float aggressionScore = 0.0;
-
-    for (int i = 0; i < gameEngine.getPlayers().size()-1; i++)
+    if (learner.playerInfo.actionMask.none())
     {
-        float killZoneValue = 1.0 / (1.0 + exp(-4.0*(extraState[KILL_ZONE_INDEX + i]-0.3)));  // sigmoid scaling for the killzone value
-        aggressionScore += rewards.killZoneEnterMove * killZoneValue;
+        return loss;
     }
 
-    for (int i = 0; i < gameEngine.getPlayers().size()-1; i++)
+    float score = win * opponentsEliminated + rewards.survivingMove * learner.snake.size();
+    for (int opponent = 1; opponent <= config.N; opponent++)
     {
-        if(prevExtraState[ESCAPE_ROUTES_INDEX + i] - extraState[ESCAPE_ROUTES_INDEX + i] > 0)
+        const auto &current = next.players.at(opponent);
+
+        if (opponent == player || !current.playerInfo.alive)
         {
-            aggressionScore += rewards.escapeReductionMove * (prevExtraState[ESCAPE_ROUTES_INDEX + i] - extraState[ESCAPE_ROUTES_INDEX + i]);
+            continue;
         }
+
+        int previousMoves = previous.players.at(opponent).playerInfo.actionMask.count();
+        int nextMoves = current.playerInfo.actionMask.count();
+
+        if (previousMoves > 2 && nextMoves <= 2)
+        {
+            score += rewards.killingSetupMove;
+        }
+
+        float wallProximity = computeKillZoneProximity(current.snake.front(), config);
+        // Keep the legacy sigmoid and measure lost escape routes as a fraction of the four directions.
+        score += rewards.killZoneEnterMove / (1.f + exp(-4.f * (wallProximity - 0.3f)));
+        score += rewards.escapeReductionMove * (max(0, previousMoves - nextMoves) / 4.f);
     }
 
-    // Entropy penalty
-    const float minAcceptableEntropy = 0.7; // ~3 moves used
-    if(extraState[ENTROPY_INDEX] < minAcceptableEntropy) {
-        aggressionScore += ((minAcceptableEntropy - extraState[ENTROPY_INDEX])/minAcceptableEntropy) * rewards.entropyPenalty;
-    }
-
-    // Depends on the size for exponential reward
-    score += rewards.survivingMove * gameEngine.getPlayers().at(playerNum).first.size();
-
-    // Z-score normalization
-    static float reward_mean = 0.0f;
-    static float reward_std = 1.0;
-    float z_score = ((score + aggressionScore) - reward_mean) / reward_std;
-    reward_mean = 0.99f * reward_mean + 0.01f * (score + aggressionScore);
-    reward_std = 0.99f * reward_std + 0.01f * fabs((score + aggressionScore) - reward_mean);
-    return z_score;
-}  //----- End of computeReward
+    return score;
+}  //----- end of computeReward

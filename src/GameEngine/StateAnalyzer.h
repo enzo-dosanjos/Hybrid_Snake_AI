@@ -1,5 +1,5 @@
 /*************************************************************************
-StateAnalyzer - todo
+StateAnalyzer - Computes stable features from game snapshots
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -10,60 +10,43 @@ StateAnalyzer - todo
 
 //------------------------------------------------------------------------
 // Role of the <StateAnalyzer> module
-// todo
+// Computes versioned numerical features with explicit player perspective
+// Feature order and normalization are documented in README.md (Game State
+// Representation)
 //------------------------------------------------------------------------
 
 //-------------------------------------------------------- Used interfaces
-#include "GameEngine.h"
-#include "Structs.h"
+#include <array>
+
+#include "../Structs.h"
 
 //----------------------------------------------------------------- PUBLIC
-class StateAnalyzer
-{
+class StateAnalyzer {
 //--------------------------------------------------------- Public Methods
     public:
-        std::vector<float> computeExtraFeatures(
-          const std::vector<float> boardState,  // todo: change
-          const Players &playerState,
-          std::unordered_map<int, std::vector<std::string>> validMoves,
-          const std::deque<std::string> &last5Moves,
-          int turn
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        std::vector<float> computeExtraFeatures(const GameState &state, int perspective,
+                                                const FeatureSelection &selection = {}) const;
+        // Contract : Return schema version 2 features; opponent slots follow ascending IDs excluding perspective
 
-        float calculateKillZoneProximity(
-          Coord oppHead
-        ) const;
-        // Usage :
-        //
-        // Contract :
-        //
+        std::vector<float> computeSpatialMetrics(const GameState &state, int perspective) const;
+        // Contract : Each opponent contributes min/max/average distances in both directions
 
-        static float calculateActionEntropy(
-          const std::deque<std::string>& moves
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        std::vector<float> computeGrowthSizeMetrics(const GameState &state, int perspective) const;
+        // Contract : Return growth period / 10, fraction of rounds until growth and own occupied fraction
 
-//---------------------------------------------- Constructors - destructor
-        StateAnalyzer(
-            const GameEngine &p_gameEngine
-        ) : gameEngine(p_gameEngine)
-        {
-            #ifdef MAP
-                        cout << "Calling the constructor of StateAnalyzer" << endl;
-            #endif
-        };
+        float computeGameProgress(const GameState &state) const;
+        // Contract : Return the original capped turn-budget heuristic, not a terminal-state test
 
+        std::vector<float> computeGameplayMetrics(const GameState &state, int perspective) const;
+        // Contract : Return opponent escape and wall-proximity pairs in ascending ID order
+
+        static int getFeatureCount(int numPlayers, const FeatureSelection &selection = {});
+        // Contract : Return required context plus the selected derived features for a fixed player count
+
+//---------------------------------------------------------------- PRIVATE
     private:
-        GameEngine gameEngine;
+        static std::array<float, 3> distanceMetrics(Coord head, const std::deque<Coord> &body, float maxDistance);
+        // Contract : Return normalized minimum, maximum and mean distances for a nonempty body and positive maxDistance
 };
-
-
 
 #endif //STATEANALYZER_H

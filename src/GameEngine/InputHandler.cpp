@@ -1,5 +1,5 @@
 /*************************************************************************
-InputHandler - todo
+InputHandler - Parses configuration, origins and complete events
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -8,78 +8,130 @@ InputHandler - todo
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
-#include <iostream>
+#include <sstream>
+#include <stdexcept>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
 #include "InputHandler.h"
+#include "../Utils.h"
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-GameConfig InputHandler::readGameConfig()
-// Algorithm : Read the game configuration from the input
+GameConfig InputHandler::readGameConfig(istream &input)
+// Algorithm : Read configuration fields and reject invalid rules before allocating player data.
 {
-    int W, H, M, N, P;
+    GameConfig config;
 
-    cin >> W >> H;  // size of the board
-    cin >> M;       // grow 1 block every M rounds
-    cin >> N >> P;  // number of players and player's turn
-
-    return GameConfig{W, H, M, N, P};
-}  // ----- End of readGameConfig
-
-vector<Coord> InputHandler::readPlayersOrigins(int numPlayers)
-{
-    vector<Coord> playersOrigins(numPlayers + 1);  // player origins, index 0 is unused
-    int X, Y;
-
-    for (int i = 1; i <= numPlayers; i++) {
-        cin >> X >> Y;
-        playersOrigins[i] = Coord{X, Y};
+    if (!(
+        input >> config.W >> config.H >>    // size of the board
+        config.M >>                         // grow 1 block every M rounds
+        config.N >> config.P))              // number of players and player's turn
+    {
+        throw invalid_argument("Incomplete or malformed game configuration");
     }
 
-    return playersOrigins;
-}  // ----- End of readPlayersOrigins
+    validateGameConfig(config);
+    return config;
+}  //----- end of readGameConfig
 
-pair<string, int> InputHandler::readAction()
-// Algorithm : Read the action from the input
+
+vector<Coord> InputHandler::readPlayersOrigins(int numPlayers, istream &input)
+// Algorithm : Read one origin per player while reserving index zero for the one-based convention.
 {
-    string action;
-    int playerNb;
+    if (numPlayers <= 0)
+    {
+        throw invalid_argument("Invalid player count");
+    }
 
-    cin >> action >> playerNb;
+    vector<Coord> origins(static_cast<size_t>(numPlayers) + 1);
 
-    return {action, playerNb};
-}  // ----- End of readAction
-
-int InputHandler::readMove()
-// Algorithm : Read the move from the input
-{
-    string moveStr;
-    int move = -1;
-
-    cin >> moveStr;
-
-    for (size_t i = 0; i < ACTIONS.size(); i++) {
-        if (ACTIONS[i] == moveStr) {
-            move = i;
-            break;
+    for (int player = 1; player <= numPlayers; player++)
+    {
+        if (!(input >> origins[player].x >> origins[player].y))
+        {
+            throw invalid_argument("Incomplete or malformed player origins");
         }
     }
 
-    return move;
-}  // ----- End of readMove
+    return origins;
+}  //----- end of readPlayersOrigins
 
-void InputHandler::processDeathEvent()
-// Algorithm : Process the death event from the input
-{
-    return;
-}
 
-void InputHandler::writeMove(const int move)
-// Algorithm : Write the move to the output
+GameEvent InputHandler::readEvent(int numPlayers, istream &input)
+// Algorithm : Parse one event line, normalize its player ID and reject invalid tokens or trailing data.
 {
-    string moveStr = ACTIONS[move];
-    cout << moveStr << endl;
-}
+    GameEvent event;
+    string line;
+
+    if (!getline(input >> ws, line))
+    {
+        if (!input.eof() || input.bad())
+        {
+            event.type = GameEventType::InputError;
+            event.error = "Cannot read game event";
+        }
+
+        return event;
+    }
+
+    event.type = GameEventType::InputError;
+    event.error = "Malformed game event: " + line;
+    istringstream message(line);
+    string kind;
+    int externalPlayer;
+
+    if (!(message >> kind >> externalPlayer) || externalPlayer < 0 || externalPlayer >= numPlayers)
+    {
+        return event;
+    }
+
+    event.player = externalPlayer + 1;
+
+    if (kind == "move")
+    {
+        string direction;
+
+        if (!(message >> direction))
+        {
+            return event;
+        }
+
+        for (size_t action = 0; action < ACTIONS.size(); action++)
+        {
+            if (ACTIONS[action] == direction)
+            {
+                event.action = static_cast<Action>(action);
+                break;
+            }
+        }
+
+        if (!event.action)
+        {
+            return event;
+        }
+    }
+    else if (kind != "death")
+    {
+        return event;
+    }
+
+    string extra;
+
+    if (message >> extra)
+    {
+        return event;
+    }
+
+    event.type = kind == "move" ? GameEventType::Move : GameEventType::Death;
+    event.error.clear();
+    return event;
+}  //----- end of readEvent
+
+
+void InputHandler::writeMove(Action move, ostream &output)
+// Algorithm : Write the action's protocol name and flush the completed line.
+{
+    output << ACTIONS.at(static_cast<int>(move)) << endl;
+}  //----- end of writeMove

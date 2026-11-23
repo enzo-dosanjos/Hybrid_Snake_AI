@@ -1,5 +1,5 @@
 /*************************************************************************
-StateAnalyzer - todo
+StateAnalyzer - Computes stable features from game snapshots
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -8,221 +8,267 @@ StateAnalyzer - todo
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
-#include <iostream>
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <stdexcept>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
 #include "StateAnalyzer.h"
+#include "../Utils.h"
 
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-vector<float> StateAnalyzer::computeExtraFeatures(const vector<float> boardState, const Players &playerState,
-                    unordered_map<int, vector<string>> validMoves, const deque<string> &last5Moves, int turn)
-// Algorithm : Compute extra features for the DQN model
-// Spatial metrics :
-//     For every opponent: min distance between my snake's head and the opponent's body (normalized by max distance)
-//     For every opponent: min distance between the opponent's head and my body (normalized by max distance)
-// growth and size metrics :
-//     growth speed (normalized by the max growth speed) : M/10
-//     growth progress (normalized by M) : (M - (currentRound % M))/M
-//     snake size (normalized by the board size) : snake.size() / (W * H)
-// game metrics :
-//     game progress (normalized by the max number of turns) : min(turn / (MAX_TURNS), 1.0)
-// gameplay and aggressivity metrics :
-//     action History Entropy (normalized between -1 and 1) : tanh(calculateActionEntropy(last5Moves))
-//     For every opponent: escape routes (normalized 0-1)
-//     For every opponent: kill zone score (0-1)
+vector<float> StateAnalyzer::computeExtraFeatures(const GameState &state, int perspective,
+                                                 const FeatureSelection &selection) const
+// Algorithm : Encode required state context, then append selected derived features in a fixed order.
+// Required rules and timing :
+//   board width, board height
+//   growth interval, growth phase (round % M)
+//   absolute round, scheduled player, perspective player
+// Required player identities :
+//   Own player first, then opponents in ascending ID order:
+//     player ID, alive flag
+// Optional spatial metrics (distances) :
+//   For each opponent in ascending ID order:
+//     own head → opponent segments: min, max, mean normalized distance
+//     opponent head → own segments: min, max, mean normalized distance
+// Optional size metric (snakeSize) :
+//   own snake length / board area
+// Optional game metric (gameProgress) :
+//   capped elapsed scheduled slots / estimated turn budget
+// Optional gameplay and aggressivity metrics :
+//   For each opponent in ascending ID order:
+//     legal-action count / 4 (mobility)
+//     wall/corner proximity (wallProximity)
+// Disabled groups are omitted; dead opponents retain zeroed optional metric slots.
 {
-    vector<float> extras;
+    const auto &config = state.config;
+    validateGameConfig(config);
+    state.players.at(perspective);
 
-    if (validMoves.empty())
+    // Raw context avoids clipping distinct times or losing growth and scheduling information.
+    vector<float> features = {
+        float(config.W), float(config.H), float(config.M), float(state.round % config.M),
+        float(state.round), float(state.currentPlayer), float(perspective)
+    };
+    vector<int> players{perspective};
+
+    for (int player = 1; player <= config.N; player++)
     {
-        for (auto &player : playerState)
+        if (player != perspective)
         {
-            if (player.first != gameEngine.config.P)
+            players.push_back(player);
+        }
+    }
+
+    // IDs and alive flags follow the board's own-first slot ordering, including dead snakes.
+    for (int player : players)
+    {
+        features.push_back(float(player));
+        features.push_back(state.players.at(player).playerInfo.alive ? 1.f : 0.f);
+    }
+
+    if (selection.distances)
+    {
+        auto spatial = computeSpatialMetrics(state, perspective);
+        features.insert(features.end(), spatial.begin(), spatial.end());
+    }
+
+    if (selection.snakeSize)
+    {
+        features.push_back(computeGrowthSizeMetrics(state, perspective)[2]);
+    }
+
+    if (selection.gameProgress)
+    {
+        features.push_back(computeGameProgress(state));
+    }
+
+    if (selection.mobility || selection.wallProximity)
+    {
+        auto gameplay = computeGameplayMetrics(state, perspective);
+
+        for (size_t opponent = 0; opponent < gameplay.size(); opponent += 2)
+        {
+            if (selection.mobility)
             {
-                validMoves[player.first] = getValidMoves(boardState, playerState, player.first);
+                features.push_back(gameplay[opponent]);
+            }
+
+            if (selection.wallProximity)
+            {
+                features.push_back(gameplay[opponent + 1]);
             }
         }
     }
 
-    int nbAlivePlayers = 0;
-    vector<float> escapeRoutes;
-    vector<float> killZoneScore;
-    for (auto &player : playerState)
-    {
-        if (player.second.playerInfo.alive)
-        {
-            nbAlivePlayers++;
-        }
-        if (player.first != config.P)
-        {
-            // Opponent Escape Route Counter
-            escapeRoutes.push_back(validMoves[player.first].size() / 4.0);  // Normalized 0-1
-
-            // Kill Zone Proximity (0-1)
-            killZoneScore.push_back(calculateKillZoneProximity(player.second.snake.front()));
-        }
-    }
-
-    // Phase-Based Aggression Coefficient
-    const float MAX_TURNS = (config.M > 1) ? 0.8*(config.W * config.H * config.M) : (config.W * config.H * config.M);
-    float phase = min(((float)turn / MAX_TURNS), 1.0f);  // Assuming W*H*M turn max for the game
-
-    // action History Entropy (measure passivity)
-    float entropy = tanh(calculateActionEntropy(last5Moves));  // normalised between -1 and 1
+    return features;
+}  //----- end of computeExtraFeatures
 
 
-    InputMinMaxAvg playerToBot;
-    InputMinMaxAvg botToPlayer;
-
-    Coord myHead = playerState.at(config.P).snake.front();
-    int mySnakeSize = playerState.at(config.P).snake.size();
-
-    const float MAX_DISTANCE = sqrt(config.W * config.W + config.H * config.H);
-
-    for (const auto &player : playerState)
-    {
-        if (player.first != config.P)
-        {
-            const deque<Coord> &snake = player.second.snake;
-
-            botToPlayer.min = playerToBot.min = MAX_DISTANCE;  // max distance allowed
-                                                               // by the board's size
-            botToPlayer.avg = playerToBot.avg = botToPlayer.max = playerToBot.max = 0;
-
-            for (size_t i = 0; i < snake.size(); i++)
-            {
-                float x = snake[i].x;
-                float y = snake[i].y;
-
-                float dist = sqrt((x-myHead.x)*(x-myHead.x) + (y-myHead.y)*(y-myHead.y));
-
-                // Normalise every distances
-                dist /= MAX_DISTANCE;
-
-                // Compute Min, Max and Avg between my Head to the opponent's body
-                playerToBot.avg += dist/snake.size();
-
-                playerToBot.max = max(playerToBot.max, dist);
-
-                playerToBot.min = min(playerToBot.min, dist);
-
-                if (i == 0)
-                {
-                    for (int j = 0; j < mySnakeSize; j++)
-                    {
-                        float myX = playerState.at(config.P).snake[j].x;
-                        float myY = playerState.at(config.P).snake[j].y;
-                        dist = sqrt((x - myX)*(x - myX) + (y - myY)*(y - myY));
-
-                        // Normalise every distances
-                        dist /= MAX_DISTANCE;
-
-                        // Compute Min, Max and Avg between the opponent's head to my body
-                        botToPlayer.avg += dist/mySnakeSize;
-
-                        botToPlayer.min = min(botToPlayer.min, dist);
-
-                        botToPlayer.max = max(botToPlayer.max, dist);
-                    }
-                }
-            }
-
-            extras.insert(extras.end(),
-            {
-                playerToBot.min,
-                playerToBot.max,
-                playerToBot.avg,
-                botToPlayer.min,
-                botToPlayer.max,
-                botToPlayer.avg
-            });
-        }
-    }
-
-    // growth speed, nb of round before growth and snake size
-    int currentRound = ((turn) / nbAlivePlayers);
-    extras.insert(extras.end(),
-    {
-        (float)config.M/10.0f,  // normalise M between 0 and 1
-        (float)(config.M - (currentRound % config.M))/(float)config.M,    // normalise between 0 and 1
-        (float)playerState.at(config.P).snake.size() / (float)(config.W * config.H)  // normalise between 0 and 1
-    });
-
-
-    for (size_t i = 0; i < escapeRoutes.size(); i++)
-    {
-        extras.insert(extras.end(), {
-            escapeRoutes[i],
-            killZoneScore[i]
-        });
-    }
-
-    extras.insert(extras.end(), {
-        phase,
-        entropy
-    });
-
-    return extras;
-}  // ----- End of computeExtraFeatures
-
-float Reward::calculateKillZoneProximity(Coord oppHead) const
-// Algorithm : Calculate the proximity of a player to a kill zone (corners and walls)
+vector<float> StateAnalyzer::computeSpatialMetrics(const GameState &state, int perspective) const
+// Algorithm : Visit opponent IDs in order and retain six zero values for every dead opponent
 {
-    // Calculate corner proximity
-    float cornerWeight = 0.0;
-    const float quartW = config.W/4.0;
-    const float quartH = config.H/4.0;
+    const auto &own = state.players.at(perspective);
+    const auto &config = state.config;
+    validateGameConfig(config);
 
-    // Check if in outer 25% of board edges
-    if(oppHead.x < quartW || oppHead.x > config.W - quartW)
+    if (own.snake.empty())
     {
-        cornerWeight += 0.5;
+        throw invalid_argument("Cannot analyze an empty snake");
     }
 
-    if(oppHead.y < quartH || oppHead.y > config.H - quartH)
+    vector<float> features;
+    // Use the board diagonal as a distance bound, including for single-cell dimensions
+    float maxDistance = hypot(float(config.W), float(config.H));
+
+    // Iterate by ID rather than container order to keep each opponent in a stable slot
+    for (int player = 1; player <= config.N; player++)
     {
-        cornerWeight += 0.5;
+        if (player == perspective)
+        {
+            continue;
+        }
+
+        const auto &opponent = state.players.at(player);
+
+        if (!opponent.playerInfo.alive)
+        {
+            // Retain the six distance slots after an opponent dies
+            features.insert(features.end(), 6, 0.f);
+            continue;
+        }
+
+        if (opponent.snake.empty())
+        {
+            throw invalid_argument("Cannot analyze an empty snake");
+        }
+
+        // Measure both directions because the heads and snake shapes differ
+        // Each target snake includes all segments, including its head and tail
+        auto toOpponent = distanceMetrics(own.snake.front(), opponent.snake, maxDistance);
+        auto toOwn = distanceMetrics(opponent.snake.front(), own.snake, maxDistance);
+        features.insert(features.end(), toOpponent.begin(), toOpponent.end());
+        features.insert(features.end(), toOwn.begin(), toOwn.end());
     }
 
-    // Calculate the minimum distance to any wall
-    float wallDist = min({
-        (float)oppHead.x,
-        (float)(config.W-1 - oppHead.x),
-        (float)oppHead.y,
-        (float)(config.H-1 - oppHead.y)
-    });
-
-    // Normalize and invert (0 = at wall, 1 = center)
-    float normalizedWall = 1.0 - (wallDist / (max(config.W, config.H)/2.0));
-
-    // Combine factors (corner presence + wall proximity)
-    return (cornerWeight + normalizedWall) / 2.0;
-}  // ----- End of calculateKillZoneProximity
+    return features;
+}  //----- end of computeSpatialMetrics
 
 
-float StateAnalyzer::calculateActionEntropy(const deque<string>& moves)
-// Algorithm : Calculate the entropy of the action history
+vector<float> StateAnalyzer::computeGrowthSizeMetrics(const GameState &state, int perspective) const
+// Algorithm : Use the authoritative round for growth phase and normalize length by board area
 {
-    if (moves.empty())
+    const auto &config = state.config;
+    validateGameConfig(config);
+    // The final modulo maps a growth round to zero instead of a full remaining period
+    int roundsUntilGrowth = (config.M - state.round % config.M) % config.M;
+
+    // Larger M means slower growth; division by 10 retains the existing feature scale
+    // The remaining values express the fraction of a growth period and occupied board area
+    return {
+        config.M / 10.f,  // max value for M by game definition
+        roundsUntilGrowth / float(config.M),
+        state.players.at(perspective).snake.size() / (float(config.W) * config.H)
+    };
+}  //----- end of computeGrowthSizeMetrics
+
+
+float StateAnalyzer::computeGameProgress(const GameState &state) const
+// Algorithm : Normalize elapsed scheduled slots using the existing board-area and growth-period heuristic
+{
+    const auto &config = state.config;
+    validateGameConfig(config);
+    // This is an estimated duration for scaling the feature, not an enforced game limit
+    float maxTurns = float(config.W) * config.H * config.M;
+
+    // Preserve the original shorter duration estimate when growth is not every round
+    if (config.M > 1)
     {
-        return 0.0; // Max entropy when no history
+        maxTurns *= 0.8f;
     }
 
-    map<string, int> counts;
-    for(const auto& m : moves)
+    // Original player count includes dead slots; deaths must not accelerate the clock
+    float turn = float(state.round) * config.N + state.currentPlayer - 1;
+    return clamp(turn / maxTurns, 0.f, 1.f);
+}  //----- end of computeGameProgress
+
+
+vector<float> StateAnalyzer::computeGameplayMetrics(const GameState &state, int perspective) const
+// Algorithm : Encode ordered opponent mobility and wall proximity without dependence on move history
+{
+    const auto &config = state.config;
+    validateGameConfig(config);
+    vector<float> features;
+
+    for (int player = 1; player <= config.N; player++)
     {
-        counts[m]++;
+        if (player == perspective)
+        {
+            continue;
+        }
+
+        const auto &opponent = state.players.at(player);
+
+        if (!opponent.playerInfo.alive)
+        {
+            // Keep the same opponent slots as the spatial block, even after death
+            features.insert(features.end(), 2, 0.f);
+            continue;
+        }
+
+        if (opponent.snake.empty())
+        {
+            throw invalid_argument("Cannot analyze an empty snake");
+        }
+
+        // Mobility is the fraction of the four directions currently legal for this opponent
+        features.push_back(opponent.playerInfo.actionMask.count() / 4.f);
+        features.push_back(computeKillZoneProximity(opponent.snake.front(), config));
     }
 
-    float entropy = 0.0;
-    for(const auto &[move, cnt] : counts)
+    return features;
+}  //----- end of computeGameplayMetrics
+
+
+int StateAnalyzer::getFeatureCount(int numPlayers, const FeatureSelection &selection)
+// Algorithm : Count required context and the enabled derived feature groups
+{
+    if (numPlayers < 1)
     {
-        float p = cnt / (float)moves.size();
-        entropy -= p * log2(p);
+        throw invalid_argument("Feature count requires at least one player");
     }
-    return entropy / 2.0;  // Max entropy for 4 moves = 2.0
-}  // ----- End of calculateActionEntropy
+
+    int opponents = numPlayers - 1;
+    return 7 + 2*numPlayers + 6*opponents*selection.distances + selection.snakeSize +
+           selection.gameProgress + opponents*(selection.mobility + selection.wallProximity);
+}  //----- end of getFeatureCount
+
+
+//---------------------------------------------------------------- PRIVATE
+array<float, 3> StateAnalyzer::distanceMetrics(Coord head, const deque<Coord> &body, float maxDistance)
+// Algorithm : Accumulate normalized Euclidean min, max and mean distances from a head to all segments
+{
+    if (body.empty())
+    {
+        throw invalid_argument("Cannot measure distances to an empty snake");
+    }
+
+    // Slots hold minimum, maximum and mean; normalized distances are bounded by one
+    array<float, 3> result{1.f, 0.f, 0.f};
+
+    for (const Coord &cell : body)
+    {
+        float distance = hypot(float(head.x) - cell.x, float(head.y) - cell.y) / maxDistance;
+        result[0] = min(result[0], distance);
+        result[1] = max(result[1], distance);
+        // Accumulate each segment's share of the mean, giving every segment equal weight
+        result[2] += distance / body.size();
+    }
+
+    return result;
+}  //----- end of distanceMetrics

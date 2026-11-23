@@ -2,7 +2,8 @@ AI
 .vscode
 .idea
 temp/
-train.cpp
+/train
+/optimise
 model.model
 best_params.txt
 /build/

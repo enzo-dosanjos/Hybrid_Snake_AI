@@ -1,5 +1,5 @@
 /*************************************************************************
-InputHandler - todo
+InputHandler - Reads and writes the competition protocol
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -10,33 +10,30 @@ InputHandler - todo
 
 //------------------------------------------------------------------------
 // Role of the <InputHandler> module
-// todo
+// Validates input and converts external messages into typed one-based events.
 //------------------------------------------------------------------------
+
+//--------------------------------------------------------- System Include
+#include <iostream>
 
 //-------------------------------------------------------- Used interfaces
 #include "../Structs.h"
-
-//-------------------------------------------------------------- Constants
-
-//------------------------------------------------------------------ Types
 
 //----------------------------------------------------------------- PUBLIC
 class InputHandler {
 //--------------------------------------------------------- Public Methods
     public:
-        static GameConfig readGameConfig();
+        static GameConfig readGameConfig(std::istream &input = std::cin);
+        // Contract : Read and validate board rules and the already one-based controlled-player ID.
 
-        static std::vector<Coord> readPlayersOrigins(int numPlayers);
+        static std::vector<Coord> readPlayersOrigins(int numPlayers, std::istream &input = std::cin);
+        // Contract : Read exactly N coordinate pairs into positions 1..N, leaving index zero unused.
 
-        static std::pair<std::string, int> readAction();
+        static GameEvent readEvent(int numPlayers, std::istream &input = std::cin);
+        // Contract : Read one complete event; return End on EOF and InputError for malformed messages.
 
-        static int readMove();
-
-        static void processDeathEvent();
-
-        static void writeMove(const int move);
+        static void writeMove(Action move, std::ostream &output = std::cout);
+        // Contract : Write a valid direction and flush it for the competition runner.
 };
-
-
 
 #endif //INPUTHANDLER_H

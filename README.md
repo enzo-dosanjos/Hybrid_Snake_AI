@@ -2,65 +2,32 @@
 
 ![Recorded Snake match with numbered heads, connected bodies, ringed tails and move metrics](docs/images/match-demo.gif)
 
-*Illustrative hybrid match: two players grow every three rounds. An offensive
-heuristic tries to cut off the opponent; six-ply Minimax checks survival and
-rejects risky attacks. The animation shows which policy selected each move.
+*Illustrative match using hand-coded policies. Two players grow every three
+rounds, and a six-ply Minimax search checks the offensive heuristic's proposed
+moves.*
 
 ## Overview
 
-![PROJECT UNDER REFACTORING — The test suite currently fails and the hybrid AI is not operational.](docs/images/refactoring-status.svg)
-
-This is an advanced AI system for playing a multiplayer Snake games to participate in the [INSAlgo Snake Competition](https://github.com/INSAlgo/Concours-Snake)
-
-The project implements a combination of 2 AI approaches in C++ without using any external libraries:
-1. **Minimax Algorithm with Alpha-Beta Pruning**  
-   *Focus: Defense & Survival*
-  - **Self-preservation:** Avoids self-blocking by ensuring safe moves.
-  - **Defensive Search:** Evaluates moves to trap or force the opponent into a dangerous position.
-  - **Dynamic Evaluation:** Adjusts search based on board size and game state.
-
-2. **Deep Q-Learning (DQN) with Convolutional & Fully Connected Neural Networks**  
-   *Focus: Offense & Adaptability*
-  - **Risk-Taking:** Learns to exploit opportunities and take calculated risks.
-  - **Adaptive Strategy:** Adapts to opponent behavior and varying map sizes.
-  - **Feature Extraction:** Uses a CNN to visually process the game board and an FCNN to make decisions based on combined features.
-
----
-
-## Key Features
-
-- **Hybrid AI Strategies:**
-  - **Minimax with Alpha-Beta Pruning:** Guarantees defensive play and trap-setting.
-  - **Deep Q-Network (DQN):** Combines CNN for board analysis with FCNN for decision making.
-  - **Hybrid Integration:** Leverages the strengths of both approaches for optimal performance.
-
-- **Advanced Spatial Risk Analysis:**
-  - Dynamic risk heatmaps and multi-source flood fill algorithms for area control.
-  - Temporal-spatial risk assessment to evaluate movement dangers.
-
-- **Sophisticated Reward System:**
-  - Rewards based on space control, kill zone detection, and anti-passivity.
-  - Tailored metrics that adjust for board size and dynamic game scenarios.
-
-- **Robust Training & Validation Tools:**
-  - Experience replay buffer for stable training.
-  - Tools for saving/loading models and performance analytics.
-  - Integrated validation routines to analyze victories, survival turns, rewards, Q-value consistency, and action entropy.
+The C++ player speaks the [INSAlgo Snake Competition protocol](https://github.com/INSAlgo/Concours-Snake).
+Its default Minimax agent scores legal moves with alpha-beta search and territory
+and risk estimates. The player also supports DQN and Hybrid policies backed by
+checkpoints produced by the training executable.
 
 ---
 
 ## Architecture
 
-The diagram below summarizes the target architecture for the refactoring.
-The complete class interfaces, ownership relationships and behavioral contracts
-are defined in [ClassDiagram.puml](ClassDiagram.puml).
-Arrows show component dependencies.
+The diagram shows the main dependencies of the three executables.
+[ClassDiagram.puml](ClassDiagram.puml) describes their interfaces, ownership and
+behavioral contracts.
 
 ```mermaid
 flowchart TD
     subgraph Application
-        GameLoop[GameLoop]
-        TrainingLoop[TrainingLoop]
+        Play["AI (main.cpp)"]
+        Train["train (train.cpp)"]
+        Optimise["optimise (optimise.cpp)"]
+        TrainingLoop["playLearnerDecision"]
         InputHandler[InputHandler]
     end
 
@@ -68,6 +35,7 @@ flowchart TD
         GameEngine[GameEngine]
         GameState[GameState]
         PlayerSelector[PlayerSelector]
+        DecisionEncoding["encodeDecision"]
         Observation[Observation]
         StateAnalyzer[StateAnalyzer]
     end
@@ -92,26 +60,34 @@ flowchart TD
         ResultValidation[ResultValidation]
     end
 
-    GameLoop --> InputHandler
-    GameLoop --> GameEngine
-    GameLoop --> Agents
+    Play --> InputHandler
+    Play --> GameEngine
+    Play --> Agents
+    Play --> ModelPersistence
+    Train --> GameEngine
+    Train --> TrainingLoop
+    Train --> InputHandler
+    Train --> Agents
+    Train --> DQN
+    Train --> ModelPersistence
+    Train --> ResultValidation
+    Optimise --> InputHandler
+    Optimise --> MinimaxAgent
+    Optimise --> ResultValidation
     TrainingLoop --> GameEngine
     TrainingLoop --> Agents
-    TrainingLoop --> DQN
-    TrainingLoop --> Observation
-    TrainingLoop --> StateAnalyzer
+    TrainingLoop --> DecisionEncoding
     TrainingLoop --> Reward
-    TrainingLoop --> ModelPersistence
-    TrainingLoop --> ResultValidation
     GameEngine --> GameState
     GameEngine --> PlayerSelector
+    DecisionEncoding --> Observation
+    DecisionEncoding --> StateAnalyzer
+    DecisionEncoding --> GameEngine
     Observation --> GameState
     StateAnalyzer --> GameState
-    DQNAgent --> Observation
-    DQNAgent --> StateAnalyzer
+    DQNAgent --> DecisionEncoding
     DQNAgent --> DQN
-    HybridAgent --> Observation
-    HybridAgent --> StateAnalyzer
+    HybridAgent --> DecisionEncoding
     HybridAgent --> DQN
     HybridAgent --> Minimax
     MinimaxAgent --> Minimax
@@ -130,122 +106,304 @@ flowchart TD
 - **Observation and StateAnalyzer** transform a state into board channels and
   ordered numerical features. `EncodedState` groups these inputs with the legal
   action mask; `Transition` stores a learning experience.
-- **Agents** share a `selectAction` interface. `DQNAgent` uses learned Q-values,
-  `MinimaxAgent` uses search scores, and `HybridAgent` combines their normalized
-  scores over legal actions using `(1 - lambda) * minimaxScore + lambda * qValue`.
+- **Agents** share a `selectAction` interface for the scheduled player.
+  `DQNAgent` uses learned Q-values, and `MinimaxAgent` uses search scores.
+  `HybridAgent` scales each scorer independently to `[0, 1]` using its legal
+  minimum and maximum, maps constant scores to zero, and maximizes
+  `(1 - lambda) * minimaxScore + lambda * qValue`. Score ties follow Action enum
+  order. Both neural agents borrow the training learner and use its feature
+  selection. With exploration enabled, the learner's current epsilon is the
+  probability of choosing a uniformly random legal action.
 - **DQN** owns online and target networks plus its replay buffer. CNN features
   pass through global average pooling and are combined with extra features before
   the FCNN produces four action values.
-- **TrainingLoop** orchestrates episodes, rewards, replay training, target-network
-  updates, model persistence and validation. Agents borrow the learner's DQN.
+- **train** owns the learner, runs episodes and schedules replay updates,
+  target synchronization, saves and validation. `playLearnerDecision` executes
+  the learner action and intervening opponent turns to produce a transition.
+- **optimise** evaluates Minimax configurations on caller-supplied setups and
+  writes the winning weights and depth.
 
 ---
 
 ## Project Structure
 
 ```
-├── include/
-│   ├── CNN.h               # Convolutional neural network
-│   ├── FCNN.h              # Fully connected neural network
-│   ├── Minimax.h           # Minimax algorithm with alpha-beta pruning
-│   ├── NNAI.h              # Combination of CNN and FCNN for AI
-│   ├── ReplayBuffer.h      # Replay buffer for deep Q-Learning
-│   ├── SpaceRiskAnalyzer.h # Spatial risk assessment
-│   ├── Structs.h           # Data structures
-│   └── Utils.h             # Utility functions
+├── main.cpp                # Competition protocol loop
+├── train.cpp               # Neural training, checkpointing and evaluation
+├── optimise.cpp            # Minimax parameter search
+├── snake.py                # Local competition runner
 ├── src/
-│   ├── CNN.cpp               # Implementation of a convolutional neural network
-│   ├── FCNN.cpp              # Implementation of a fully connected neural network
-│   ├── Minimax.cpp           # Implementation of a minimax algorithm with alpha-beta pruning
-│   ├── NNAI.cpp              # Implementation of the combination of CNN and FCNN for AI
-│   ├── ReplayBuffer.cpp      # Implementation of a replay buffer for deep Q-Learning
-│   ├── SpaceRiskAnalyzer.cpp # Implementation of a spatial risk assessment class
-│   └── Reward.cpp             # Implementation of utility functions
+│   ├── Agent/              # Action-selection interface and policies
+│   ├── GameEngine/         # Rules, input and observation encoding
+│   ├── Minimax/            # Alpha-beta search and spatial risk analysis
+│   ├── DQN/                # Neural networks and learning components
+│   ├── TrainingLoop.h/.cpp  # Decision-to-decision transitions
+│   ├── Structs.h           # Shared data structures
+│   └── Utils.h             # Shared helpers
+├── tests/                  # C++ component and executable tests
+└── tools/visualizer/       # Browser viewer for live and recorded matches
 ```
 
 ---
 
 ## Game State Representation
 
+`Observation::encode(state, perspective)` and
+`StateAnalyzer::computeExtraFeatures(state, perspective)` consume a valid engine
+snapshot and return owned values. Neither component retains or mutates a state.
+Player IDs are `1..N`; the perspective is explicit and need not be the scheduled
+player. Legal-action masks come from the engine snapshot.
+
 ### Board State
-The board is represented as a flattened 2D grid with **6 channels per cell**:
-- **Channel 0:** My snake head
-- **Channel 1:** My snake body
-- **Channel 2:** Opponent snake head
-- **Channel 3:** Opponent snake body
-- **Channel 4:** X coordinate (normalized)
-- **Channel 5:** Y coordinate (normalized)
+
+Board schema 2 uses `[channel][y][x]`, with **4*N + 1 channels**.
+Player slot zero is the perspective player. The remaining slots follow ascending
+player ID, excluding that player. Each player keeps its own channels, including
+when dead.
+
+| Channel within player slot `k` | Value |
+| --- | --- |
+| `4*k` | Head |
+| `4*k + 1` | Interior body |
+| `4*k + 2` | Tail |
+| `4*k + 3` | Segment order: `(index from head + 1) / (W*H)`; zero for absent cells |
+| Final channel `4*N` | Unoccupied cell (not reachability) |
+
+A one-segment snake is both head and tail. Segment order preserves the complete
+snake path, including which segment becomes the next tail. Dead bodies remain
+occupied.
 
 ### Extracted Features
-- **Distance Metrics:**
-  - For every opponent: Minimum, maximum, and average distances from my snake's head to the opponent’s body (normalized by max distance)
-  - For every opponent: Minimum, maximum, and average distances from the opponent's head to my snake's body (normalized by max distance)
-- **Growth Metrics:**
-  - Growth speed
-  - Rounds remaining until growth
-  - Current snake size
-- **Spatial Metrics:**
-  - For every opponent: escape routes (normalized 0-1)
-  - For every opponent: kill zone score (proximity to danger zones, normalized 0-1)
-- **Behavioral Metrics:**
-  - Phase-Based Aggression Coefficient (0-1)
-  - action History Entropy (-1-1)
 
----
+Extra-feature schema 2 has a **required prefix**, followed by optional derived
+features. The required prefix cannot be disabled through `FeatureSelection`:
+
+| Block | Values, in order | Size |
+| --- | --- | --- |
+| Rules and time | W, H, M, round % M, absolute round, currentPlayer, perspective | 7 |
+| Player slots | Player ID, alive flag, in the same own-first order as board channels | 2*N |
+
+Rules, IDs and time are supplied as raw numerical values, without clipping.
+This preserves distinctions between late rounds even after the optional progress
+estimate saturates. Player count is fixed per model and recoverable from its
+layout. Dead players retain their ID and have alive = 0.
+
+Optional groups are appended in this order:
+
+| Selection flag | Values | Size |
+| --- | --- | --- |
+| `distances` | Per opponent: own head to opponent segments min/max/mean, then opponent head to own segments min/max/mean | 6*(N - 1) |
+| `snakeSize` | Own snake length / (W*H) | 1 |
+| `gameProgress` | Capped elapsed scheduled slots / heuristic turn budget | 1 |
+| `mobility`, `wallProximity` | Per opponent: enabled legal-action count / 4, then enabled wall/corner proximity | Up to 2*(N - 1) |
+
+Opponent metrics follow ascending ID excluding the perspective player; dead
+opponents retain zero-filled metric slots. With every group enabled there are
+`10*N + 1` values: **21 for two players**. With all groups disabled only the
+`7 + 2*N` required values remain. Use
+`StateAnalyzer::getFeatureCount(N, selection)` rather than a hard-coded size.
+
+### Comparing Feature Groups
+
+Use the same selection for every observation supplied to a model:
+
+```cpp
+FeatureSelection selection;
+selection.distances = false;
+selection.wallProximity = false;
+
+auto features = analyzer.computeExtraFeatures(state, perspective, selection);
+int featureCount = StateAnalyzer::getFeatureCount(state.config.N, selection);
+
+ModelConfig config;
+config.numPlayers = state.config.N;
+config.features = selection;
+config.extraFeatureCount = featureCount;
+```
+
+All flags default to true. To test only required inputs, use
+`FeatureSelection{false, false, false, false, false}`. The flags select groups,
+not individual distance statistics. Changing selection changes input positions
+and potentially their count: train a separate model for each selection. Compare
+runs using the same opponents, boards, evaluation conditions and training budget.
+
+### Formulas and State Sufficiency
+
+- Distances retain Euclidean normalization `sqrt(W*W + H*H)` and include all
+  stored segments, including head and tail.
+- Growth uses the authoritative round and the fixed player schedule, including
+  dead slots. `round % M == 0` identifies a growth round.
+- Elapsed slots are `round*N + currentPlayer - 1`. The optional progress heuristic
+  uses `W*H*M`, multiplied by 0.8 when M > 1, and clamps the ratio to `[0,1]`.
+  It does not determine termination or replace the required absolute round.
+- Wall/corner proximity adds 0.5 for each axis within its outer quarter, then
+  averages that weight with `1 - nearestWallDistance/(max(W,H)/2)` and clamps to
+  `[0,1]`.
+- Engine snapshots keep up to five recent actions per player for diagnostics.
+
+For valid engine snapshots and ordinary supported board sizes, these inputs
+retain the geometry, identities and timing needed for game transitions.
+
+The encoders omit opponent policy and internal agent state. Those can affect
+future actions even when the encoded board and turn context are identical.
 
 ## Components
 
-## SpaceRiskAnalyzer
-SpaceRiskAnalyzer is a spatial risk assessment system for grid-based games that provides tools to evaluate spatial risks, 
-available areas, and movement dangers in competitive grid environments like Snake.
-
-### Features
-- **Risk Heatmap Generation**: Calculates risk levels across the game grid based on how quickly different players can reach each cell
-- **Space Accessibility Analysis**: Determines available movement space for each player using multi-source flood fill
-- **Directional Risk Assessment**: Evaluates the danger of moving in specific directions
-- **Efficient Caching**: Avoids redundant calculations by caching precomputed data
-
-### Core Algorithms
-- **Reach Timing Computation**: Uses BFS to calculate how many steps it takes each player to reach every cell
-- **Multi-source Flood Fill**: Determines accessible areas and contested regions
-- **Exponential Decay**: Applies decay to risk factors based on distance for more accurate risk assessment
-
-
-### Minimax Algorithm
-A classical AI approach designed for strategic defense.
-
-- **Highlights:**
-  - Alpha-beta pruning for efficient state search.
-  - Evaluation functions that integrate spatial risk analysis.
-  - Adaptive to varying board sizes and dynamic game conditions.
-
-### Neural Network AI
-Deep reinforcement learning approach:
-- **CNN**: Processes the board state visually : 3x3 conv → maxpool → 3x3 conv
-- **Feature Fusion**: Concatenates spatial + analytic features
-- **FCNN**: Makes decisions based on extracted features and the output of the CNN : 64 → 32 → 4 FC layers with ReLU except the last one which is a linear layer
-- **ReplayBuffer**: Implements experience replay for stable learning
-- Training mechanisms with decay exploration rates
-
+- **SpaceRiskAnalyzer** runs breadth-first search per living player on the
+  current occupancy grid. Shortest move distances assign territory, with ties
+  treated as contested. Scheduled arrivals within the lookahead horizon feed the
+  risk heatmap, with exponential decay by move distance. Each analysis computes
+  paths from its own snapshot and reuses a decay table across calls.
+- **Minimax** uses alpha-beta search on engine successors. The root player
+  maximizes its score and every opponent minimizes it. Nonterminal leaves use
+  territory, block risk, directional heat risk and snake length. Each legal
+  root move gets a full search window, and terminal outcomes take precedence
+  over heuristic scores.
+- **DQN** defaults to two padded 3×3 ReLU convolutions with 16 and 32 channels.
+  Global average pooling gives one value per output channel. The FCNN reads
+  those values followed by the selected extra features, uses ReLU layers of
+  width 64 and 32, and outputs four linear Q-values in left, up, right, down
+  order. `ModelConfig::convolutionLayers` and `ModelConfig::denseHiddenSizes`
+  set the layer shapes. Training samples replay without replacement and
+  bootstraps from the target networks over legal next actions for nonterminal
+  transitions.
 
 ## Usage
-The main.cpp file provide 3 different main functions:
-- `gameMain` to play a game with the combination of both AI
-- `trainingMain` to train the neural network AI
-- `optimiseMain` to optimise the Minimax parameters
 
+Build `AI`, `train` and `optimise` with GNU Make and a C++17 compiler on a
+POSIX system. The default target is `all`. Individual targets build their named
+executable. `make debug` cleans the build and rebuilds `AI` with debug symbols.
+Use `make clean` before switching back to the normal build.
 
-## todo:
-- finish main.cpp
-- finish optimise.cpp
-- finish train.cpp
+Pass `AI` to the Python 3 match runner to play both seats on a 6×4 board with
+growth every round.
 
-- optimise terminal state detection in Minimax (multiple methods and don't use the alive state)
-- optimise Minimax using transition table
+```sh
+make
+python3 snake.py ./AI ./AI -g 6 4 -G 1
+```
 
-- 📈 performance benchmark
-| Metric                | Minimax Only | DQN Only | Hybrid AI |
-|-----------------------|--------------|----------|-----------|
-| Win Rate (1v1)        | 0%           | 0%       | **0%**    |
-| Decisions/sec         | 0            | 0        | 0         |
-| Training Convergence  | N/A          | 0h       | 0h        |
+`AI` reads setup and opponent events from standard input and flushes one
+direction to standard output per playable turn. It uses the default Minimax
+configuration of eight scheduled slots, including the root action, and breaks
+score ties in `Action` enum order. A trapped player exits without emitting a
+direction, which the local runner reports as a timeout. Opponent deaths consume
+their scheduled slot, including when a collision also sends a move notification.
+The setup uses a one-based controlled seat and zero-based origins. Event player
+IDs are zero-based on the wire. See the [match viewer guide](tools/visualizer/README.md)
+for live and recorded browser views.
+
+To use a checkpoint, start `AI` with one of these argument lists and supply the
+same competition input stream. Neural play uses greedy actions with exploration
+disabled. The checkpoint must match the CLI model configuration for the number
+of players in the match. Play and training use all feature groups and the default
+network shapes. Checkpoint loading checks the model configuration and both input
+schema versions before restoring weights and training state.
+
+```sh
+./AI dqn model.model
+./AI hybrid model.model 0.5
+```
+
+`0.5` gives equal weight to the normalized Minimax and neural scores. Hybrid
+weights range from `0` for Minimax scores to `1` for neural scores.
+
+### Training and validation
+
+`training.txt` contains one setup in competition format. It gives the board
+width and height, growth period, player count and one-based learner seat,
+followed by each seat's zero-based origin. For example:
+
+```text
+4 1
+1
+2 1
+0 0
+3 0
+```
+
+`validation.txt` contains one or more setups in the same format, concatenated
+without event lines. It may use different boards, origins and learner seats
+while keeping the player's model input compatible by using the same number of
+players. For example, use two held-out 3×1 setups with origins `0 0` and `2 0`
+and swap the learner seat between them. Minimax plays all other seats in both
+training and validation. Start a fresh run with a new checkpoint path.
+
+```sh
+./train 10 training.txt validation.txt model.model
+./train 10 training.txt validation.txt model.model --resume
+./train 10 training.txt validation.txt hybrid.model --hybrid 0.5
+```
+
+Each episode starts from the training setup. The learner explores during
+training and updates replay once per executed learner decision. A transition
+includes the intervening opponent turns and ends at the next learner decision
+or termination. Validation disables exploration and reports wins, win rate and
+mean survival turns over the supplied matches.
+
+Defaults are batch size 32, learning rate `0.00001`, target synchronization
+every 100 updates, and saving and evaluation every 10 episodes. Set these with
+`--batch-size N`, `--learning-rate RATE`, `--target-every UPDATES`,
+`--save-every EPISODES` and `--evaluate-every EPISODES`. Saving and evaluation
+also run after the final episode. `--seed N` sets the initial model and
+training RNG seed, which defaults to 5489 for a fresh run.
+
+`--resume` restores the learner, target networks, replay, exploration and RNG
+state, and the absolute update counter. It starts a fresh episode, and the
+save and evaluation intervals count episodes in the current invocation. Pass
+the same training settings when continuing a run.
+
+### Minimax parameter optimization
+
+Give `optimise` a file of competition setups in the validation format above.
+Each setup specifies the candidate's seat, and the default Minimax agent
+plays every other seat. Supply boards, origins and seats that reflect the
+matches you want the optimizer to score.
+
+```sh
+./optimise validation.txt best_params.txt
+./optimise validation.txt best_params.txt --population 4 --generations 3 --seed 17
+```
+
+The genetic search evaluates every candidate on the same setups and ranks them
+by win rate. Mean survival turns are reported separately. The two highest-ranked
+individuals carry over, and the remaining candidates inherit each field from one
+of two uniformly sampled parents. The defaults are a population of 30, 50
+generations and seed 5489. The population must be at least 3. Initial weights
+use the legacy ranges and initial depths range from 6 to 10 scheduled slots.
+
+The first line of the output file stores the weights in the order
+`selfSpace oppSpace selfBlockRisk oppBlockRisk selfHeatRisk oppHeatRisk snakeLength`.
+The second line gives the depth. The optimizer replaces the named output with
+the winner after the search completes. Ties keep the first candidate to reach the
+winning score.
+
+```sh
+./AI minimax --minimax-params best_params.txt
+./AI hybrid model.model 0.5 --minimax-params best_params.txt
+./train 10 training.txt validation.txt tuned.model --hybrid 0.5 --minimax-params best_params.txt
+```
+
+Play and training load the file once at startup. In training, the parameters
+configure the Minimax opponents and the Minimax branch of Hybrid behavior and
+evaluation. Play and training use the built-in defaults when the option is
+omitted. When resuming tuned training, pass the same parameter file again.
+
+## Tests
+
+```sh
+make test
+make test TEST=optimise
+make test TEST=--list
+```
+
+The permanent suites exercise the engine, encoders, search, neural gradients,
+learning updates, agents and checkpoint persistence. Executable tests cover
+competition protocol transcripts, training and resumption, DQN and Hybrid play,
+and loading optimized Minimax parameters in play and training. See the
+[testing guide](tests/README.md) for component coverage and CI behavior.
+
+## Future work
+
+- Profile Minimax terminal-state checks and assess a transposition table.
+- Benchmark decision throughput, match outcomes and learning convergence.

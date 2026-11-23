@@ -1,5 +1,5 @@
 /*************************************************************************
-HybridAgent - todo
+HybridAgent - Combines Minimax and learned action scores
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -8,57 +8,41 @@ HybridAgent - todo
 #ifndef HYBRIDAGENT_H
 #define HYBRIDAGENT_H
 
-
 //------------------------------------------------------------------------
 // Role of the <HybridAgent> module
-// todo
+// Weight normalized search and neural scores for the scheduled player.
 //------------------------------------------------------------------------
 
+//--------------------------------------------------------- System Include
+#include <array>
+
 //-------------------------------------------------------- Used interfaces
-#include "DQN.h"
-#include "Minimax.h"
-#include "Structs.h"
-
-//-------------------------------------------------------------- Constants
-
-//------------------------------------------------------------------ Types
+#include "Agent.h"
+#include "../DQN/DQN.h"
+#include "../Minimax/Minimax.h"
 
 //----------------------------------------------------------------- PUBLIC
-class HybridAgent {
+class HybridAgent : public Agent {
 //--------------------------------------------------------- Public Methods
     public:
-        std::string selectAction(
-            const std::vector<float> &boardState,
-            const std::vector<float> &extraFeatures,
-            const Players &playerState,
-            const std::deque<std::string> &last5Moves,
-            int turn
-        );
+        std::optional<Action> selectAction(const GameEngine &engine) override;
+        // Contract : Maximize the weighted legal scores, breaking ties in Action order.
+        // Training mode may take a uniform legal action at the learner's current epsilon.
 
 //---------------------------------------------- Constructors - destructor
-        HybridAgent(
-            int boardChannels,
-            float lambda = 0.7,
-            float eps = 1.0,
-            float minEps = 0.01,
-            float epsDecay = 0.995,
-            int replayBufferSize = 100000
-        ) : dqn(boardChannels, eps, minEps, epsDecay, replayBufferSize),
-            minimax(boardChannels),
-            lambda(lambda)
-        {
-            #ifdef MAP
-                cout << "Calling the constructor of HybridAgent" << endl;
-            #endif
-        }
+        HybridAgent(DQN &p_dqn, const MinimaxParams &params, float p_lambda, bool p_explore);
+        // Contract : Lambda is the neural score weight in [0, 1]. The learner must outlive this agent.
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        DQN dqn;
+        static std::array<double, 4> normalizeLegalScores(const std::array<float, 4> &scores,
+                                                         const ActionMask &mask);
+        // Contract : Scale only legal scores to [0, 1]; a constant scorer contributes zero.
+
+        DQN &dqn;
         Minimax minimax;
-
         float lambda;
+        bool explore;
 };
-
 
 #endif //HYBRIDAGENT_H

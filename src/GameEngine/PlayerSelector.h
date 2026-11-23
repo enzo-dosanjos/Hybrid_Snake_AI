@@ -1,5 +1,5 @@
 /*************************************************************************
-PlayerSelector - Handler for player turn selection
+PlayerSelector - Advances the scheduled player in the shared game state
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -10,62 +10,18 @@ PlayerSelector - Handler for player turn selection
 
 //------------------------------------------------------------------------
 // Role of the <PlayerSelector> module
-// The PlayerSelector module handles the selection of player turns
+// Advances scheduled slots, including dead players, without owning another clock.
 //------------------------------------------------------------------------
 
 //-------------------------------------------------------- Used interfaces
-
-//-------------------------------------------------------------- Constants
-
-//------------------------------------------------------------------ Types
 #include "../Structs.h"
 
 //----------------------------------------------------------------- PUBLIC
-class PlayerSelector
-{
+class PlayerSelector {
 //--------------------------------------------------------- Public Methods
     public:
-        int nextPlayer(
-            const Players &playerState
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        bool myTurn() const
-        {
-            return currentPlayer == playerTurn;
-        }
-        // Usage :
-        //
-        // Contract :
-        //
-
-//--------------------------------------------------------- SETTERS/GETTERS
-        int getCurrentPlayer() const
-        {
-            return currentPlayer;
-        }
-
-//---------------------------------------------- Constructors - destructor
-        PlayerSelector(const int p_numPlayers, const int p_playerTurn
-        ) : numPlayers(p_numPlayers), currentPlayer(1), playerTurn(p_playerTurn)
-        {
-            #ifdef MAP
-                std::cout << "Calling the constructor of PlayerSelector" << std::endl;
-            #endif
-        }
-
-//-------------------------------------------------------------- PROTECTED
-
-//---------------------------------------------------------------- PRIVATE
-    private:
-        int numPlayers;
-        int currentPlayer;
-        int playerTurn;
+        void advance(GameState &state) const;
+        // Contract : Advance one scheduled slot and increment the round after player N.
 };
-
-
 
 #endif //PLAYERSELECTOR_H

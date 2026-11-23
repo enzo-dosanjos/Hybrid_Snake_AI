@@ -71,21 +71,17 @@ void testDeadPlayerSlots()
 }  //----- end of testDeadPlayerSlots
 
 
-void testActionEntropy()
-// Algorithm : Tests entropy properties using empty, repeated, balanced and duplicated action histories.
+void testHistoryIndependence()
+// Algorithm : Tests that changing diagnostic histories does not change model inputs.
 {
+    GameEngine engine({5, 5, 3, 2, 1}, {{0, 0}, {0, 0}, {4, 4}});
     StateAnalyzer analyzer;
-    deque<Action> repeated(12, Action::Left);
-    deque<Action> balanced{Action::Left, Action::Up, Action::Right, Action::Down};
-    deque<Action> doubled = balanced;
-    doubled.insert(doubled.end(), balanced.begin(), balanced.end());
-
-    checkNear(analyzer.computeActionEntropy({}), 0.f, "Empty history entropy");
-    checkNear(analyzer.computeActionEntropy(repeated), 0.f, "Repeated action entropy");
-    check(analyzer.computeActionEntropy(balanced) > 0.f, "Balanced actions need positive entropy");
-    checkNear(analyzer.computeActionEntropy(balanced), analyzer.computeActionEntropy(doubled),
-              "Entropy depends on sample count instead of distribution");
-}  //----- end of testActionEntropy
+    auto state = engine.getState();
+    auto expected = analyzer.computeExtraFeatures(state, 1);
+    state.lastMoves[1] = {Action::Left, Action::Up};
+    state.lastMoves[2] = {Action::Right, Action::Down, Action::Down};
+    check(analyzer.computeExtraFeatures(state, 1) == expected, "Diagnostic history changed model inputs");
+}  //----- end of testHistoryIndependence
 
 
 void testDegenerateBoards()
@@ -106,13 +102,154 @@ void testDegenerateBoards()
 }  //----- end of testDegenerateBoards
 
 
+void testFeatureValues()
+// Algorithm : Tests every schema slot against hand-calculated geometry, rules, identities and timing values
+{
+    GameEngine engine({3, 4, 3, 2, 1}, {{0, 0}, {0, 0}, {2, 0}});
+    auto state = engine.getState();
+    state.players.at(1).snake = {{0, 0}, {0, 1}};
+    state.players.at(2).snake = {{2, 0}, {2, 1}, {2, 2}};
+    state.round = 1;
+    state.currentPlayer = 2;
+    state.lastMoves[1] = {Action::Left, Action::Up};
+    state.lastMoves[2] = {Action::Left, Action::Up, Action::Right, Action::Down};
+    GameEngine position(state);
+    StateAnalyzer analyzer;
+
+    // The legacy distance scale is sqrt(W*W + H*H), which is five on this board
+    float diagonal = sqrt(5.f) / 5.f;
+    float farthest = sqrt(8.f) / 5.f;
+    vector<float> expected = {
+        3.f, 4.f, 3.f, 1.f, 1.f, 2.f, 1.f, 1.f, 1.f, 2.f, 1.f,
+        0.4f, farthest, (0.4f + diagonal + farthest) / 3.f,
+        0.4f, diagonal, (0.4f + diagonal) / 2.f,
+        1.f / 6.f, 5.f / 48.f, 0.25f, 1.f
+    };
+    auto actual = analyzer.computeExtraFeatures(position.getState(), 1);
+    check(actual.size() == expected.size(), "Unexpected schema dimensions");
+
+    for (size_t feature = 0; feature < expected.size(); feature++)
+    {
+        checkNear(actual[feature], expected[feature], "Wrong feature at index " + to_string(feature));
+    }
+
+    check(analyzer.computeExtraFeatures(position.getState(), 2) != actual,
+          "Feature perspective was ignored");
+    check(EXTRA_FEATURE_SCHEMA_VERSION == 2, "Feature schema changed without updating its numerical contract");
+}  //----- end of testFeatureValues
+
+
+void testClockAndIdentityContext()
+// Algorithm : Tests fixed dimensions, scheduled-player sensitivity and explicit player identities
+{
+    StateAnalyzer analyzer;
+
+    for (int players : {1, 2, 3})
+    {
+        GameEngine engine({5, 5, 3, players, 1}, {{0, 0}, {0, 0}, {4, 4}, {4, 0}});
+        check(analyzer.computeExtraFeatures(engine.getState(), 1).size() ==
+              static_cast<size_t>(StateAnalyzer::getFeatureCount(players)), "Wrong fixed feature count");
+    }
+
+    GameEngine engine({5, 5, 3, 3, 1}, {{0, 0}, {0, 0}, {4, 4}, {4, 0}});
+    auto state = engine.getState();
+    auto before = analyzer.computeExtraFeatures(state, 1);
+    state.currentPlayer = 2;
+    check(analyzer.computeExtraFeatures(state, 1) != before, "Scheduled player is missing");
+    state.currentPlayer = 1;
+    state.lastMoves[2] = {Action::Left, Action::Up};
+    check(analyzer.computeExtraFeatures(state, 1) == before, "Opponent history changed required context");
+    state.players.at(2).playerInfo.alive = false;
+    auto dead = analyzer.computeExtraFeatures(state, 1);
+    state.lastMoves[2] = {Action::Left, Action::Up, Action::Right, Action::Down};
+    check(analyzer.computeExtraFeatures(state, 1) == dead, "Dead opponent history changed model inputs");
+
+    for (int round = 0; round < 6; round++)
+    {
+        state.round = round;
+        checkNear(analyzer.computeGrowthSizeMetrics(state, 1)[1],
+                  vector<float>{0.f, 2.f / 3.f, 1.f / 3.f}[round % 3], "Growth phase follows the wrong clock");
+    }
+
+    // Gameplay slot 1 holds the first opponent's wall proximity; restore its alive flag.
+    state.players.at(2).playerInfo.alive = true;
+    state.players.at(2).snake = {{0, 0}};
+    float cornerProximity = analyzer.computeGameplayMetrics(state, 1)[1];
+    checkNear(cornerProximity, 1.f, "Corner proximity should be maximal");
+    state.players.at(2).snake = {{4, 4}};
+    checkNear(cornerProximity, analyzer.computeGameplayMetrics(state, 1)[1], "Opposite corners differ");
+}  //----- end of testClockAndIdentityContext
+
+
+void testFeatureSelection()
+// Algorithm : Tests every feature-group combination against full inputs while preserving the required state prefix.
+{
+    GameEngine engine({5, 4, 3, 3, 1}, {{0, 0}, {0, 0}, {4, 3}, {4, 0}});
+    StateAnalyzer analyzer;
+    auto state = engine.getState();
+    auto full = analyzer.computeExtraFeatures(state, 2);
+    vector<float> required{5.f, 4.f, 3.f, 0.f, 0.f, 1.f, 2.f, 2.f, 1.f, 1.f, 1.f, 3.f, 1.f};
+
+    for (int mask = 0; mask < 32; mask++)
+    {
+        FeatureSelection selection{bool(mask & 1), bool(mask & 2), bool(mask & 4), bool(mask & 8), bool(mask & 16)};
+        vector<float> expected = required;
+
+        // Full layout: 13 required values, 12 distances, size, progress, then two mobility/wall pairs.
+        if (selection.distances)
+        {
+            expected.insert(expected.end(), full.begin() + 13, full.begin() + 25);
+        }
+
+        if (selection.snakeSize)
+        {
+            expected.push_back(full[25]);
+        }
+
+        if (selection.gameProgress)
+        {
+            expected.push_back(full[26]);
+        }
+
+        for (int opponent = 0; opponent < 2; opponent++)
+        {
+            if (selection.mobility)
+            {
+                expected.push_back(full[27 + 2*opponent]);
+            }
+
+            if (selection.wallProximity)
+            {
+                expected.push_back(full[28 + 2*opponent]);
+            }
+        }
+
+        auto actual = analyzer.computeExtraFeatures(state, 2, selection);
+        check(actual == expected, "Selected features changed order or required context");
+        check(actual.size() == static_cast<size_t>(StateAnalyzer::getFeatureCount(3, selection)), "Selected count mismatch");
+    }
+
+    FeatureSelection minimal{false, false, false, false, false};
+    state.round = 300;
+    auto later = analyzer.computeExtraFeatures(state, 2, minimal);
+    state.round = 303;
+    check(analyzer.computeExtraFeatures(state, 2, minimal) != later, "Absolute time was lost after progress saturation");
+    state.players.at(3).playerInfo.alive = false;
+    auto dead = analyzer.computeExtraFeatures(state, 2, minimal);
+    check(dead[11] == 3.f && dead[12] == 0.f, "Dead player lost its identity slot");
+}  //----- end of testFeatureSelection
+
+
 vector<TestCase> getTests()
 // Algorithm : Registers this component’s named test functions for independent selection and execution.
 {
     return {
+        {"feature_selection", testFeatureSelection},
         {"feature_order", testFeatureOrder},
+        {"feature_values", testFeatureValues},
+        {"clock_and_identity_context", testClockAndIdentityContext},
         {"dead_player_slots", testDeadPlayerSlots},
-        {"action_entropy", testActionEntropy},
+        {"history_independence", testHistoryIndependence},
         {"degenerate_boards", testDegenerateBoards}
     };
 }  //----- end of getTests
