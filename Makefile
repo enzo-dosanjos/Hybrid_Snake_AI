@@ -5,8 +5,14 @@ CXXFLAGS_DEBUG = -pedantic -Wall -std=c++17 -g -DMAP
 TARGET = AI
 BUILD_DIR := build
 
-SOURCES = main.cpp \
-          src/Agent/MinimaxAgent.cpp \
+SHARED_SOURCES = src/Agent/MinimaxAgent.cpp \
+          src/Agent/DQNAgent.cpp \
+          src/Agent/HybridAgent.cpp \
+          src/DQN/CNN.cpp \
+          src/DQN/DQN.cpp \
+          src/DQN/FCNN.cpp \
+          src/DQN/ModelPersistence.cpp \
+          src/DQN/ReplayBuffer.cpp \
           src/GameEngine/GameEngine.cpp \
           src/GameEngine/InputHandler.cpp \
           src/GameEngine/Observation.cpp \
@@ -14,19 +20,25 @@ SOURCES = main.cpp \
           src/GameEngine/StateAnalyzer.cpp \
           src/Minimax/Minimax.cpp \
           src/Minimax/SpaceRiskAnalyzer.cpp
-OBJECTS = $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(SOURCES))
+PLAY_SOURCES = main.cpp $(SHARED_SOURCES)
+TRAIN_SOURCES = train.cpp src/TrainingLoop.cpp src/DQN/ResultValidation.cpp src/DQN/Reward.cpp $(SHARED_SOURCES)
+PLAY_OBJECTS = $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(PLAY_SOURCES))
+TRAIN_OBJECTS = $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(TRAIN_SOURCES))
 
 .PHONY: all debug clean
 
-all: $(TARGET)
+all: $(TARGET) train
 
 debug:
 	$(MAKE) clean
 	$(MAKE) CXXFLAGS="$(CXXFLAGS_DEBUG)" $(TARGET)
 
 # Compile the target executable
-$(TARGET): $(OBJECTS)
-	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJECTS)
+$(TARGET): $(PLAY_OBJECTS)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+train: $(TRAIN_OBJECTS)
+	$(CXX) $(CXXFLAGS) -o $@ $^
 
 # Compile each source file into an object file
 $(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
@@ -39,8 +51,8 @@ $(BUILD_DIR):
 
 # Clean up everything
 clean:
-	rm -rf $(BUILD_DIR) $(TARGET)
+	rm -rf $(BUILD_DIR) $(TARGET) train
 
--include $(OBJECTS:.o=.d)
+-include $(sort $(PLAY_OBJECTS:.o=.d) $(TRAIN_OBJECTS:.o=.d))
 
 include tests/Makefile

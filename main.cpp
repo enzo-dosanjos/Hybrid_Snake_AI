@@ -10,82 +10,121 @@ main - Plays the competition game
 //--------------------------------------------------------- System Include
 #include <iostream>
 #include <optional>
+#include <random>
 #include <stdexcept>
+#include <string_view>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
 #include "src/Agent/MinimaxAgent.h"
+#include "src/ApplicationModel.h"
+#include "src/DQN/ModelPersistence.h"
 #include "src/GameEngine/GameEngine.h"
 #include "src/GameEngine/InputHandler.h"
 
-//----------------------------------------------------------------- PUBLIC
-//--------------------------------------------------------- Public Methods
-int main()
-// Algorithm : Use Minimax on our turns and apply external events once in scheduled-player order.
+//---------------------------------------------------------------- PRIVATE
+static void playGame(GameEngine &engine, Agent &agent)
+// Algorithm : Use the selected agent and apply external events once in scheduled-player order.
 {
-    try
+    int player = engine.getP();
+    int lastDeath = 0;
+
+    while (!engine.isTerminalFor(player))
     {
-        GameConfig config = InputHandler::readGameConfig();
-        auto origins = InputHandler::readPlayersOrigins(config.N);
-        GameEngine engine(config, origins);
-        MinimaxAgent agent(MinimaxParams{});
-        int lastDeath = 0;
-
-        while (!engine.isTerminalFor(config.P))
+        if (engine.getState().currentPlayer == player)
         {
-            if (engine.getState().currentPlayer == config.P)
+            optional<Action> move = agent.selectAction(engine);
+
+            if (!move)
             {
-                optional<Action> move = agent.selectAction(engine);
-
-                if (!move)
-                {
-                    engine.playerDied(config.P);
-                    engine.finishTurn();
-                    break;
-                }
-
-                InputHandler::writeMove(*move);
-                engine.updateStep(*move);
-                continue;
-            }
-
-            GameEvent event = InputHandler::readEvent(config.N);
-
-            if (event.type == GameEventType::End)
-            {
+                engine.playerDied(player);
+                engine.finishTurn();
                 break;
             }
 
-            if (event.type == GameEventType::InputError)
-            {
-                throw invalid_argument(event.error);
-            }
+            InputHandler::writeMove(*move);
+            engine.updateStep(*move);
+            continue;
+        }
 
-            // A collision produces both death and move messages in snake.py; its turn was already counted.
-            if (event.type == GameEventType::Move && event.player == lastDeath)
-            {
-                lastDeath = 0;
-                continue;
-            }
+        GameEvent event = InputHandler::readEvent(engine.getN());
 
+        if (event.type == GameEventType::End)
+        {
+            break;
+        }
+
+        if (event.type == GameEventType::InputError)
+        {
+            throw invalid_argument(event.error);
+        }
+
+        // A collision produces both death and move messages in snake.py; its turn was already counted.
+        if (event.type == GameEventType::Move && event.player == lastDeath)
+        {
             lastDeath = 0;
+            continue;
+        }
 
-            if (event.player != engine.getState().currentPlayer)
-            {
-                throw invalid_argument("Game event does not match the scheduled player");
-            }
+        lastDeath = 0;
 
-            if (event.type == GameEventType::Death)
-            {
-                engine.playerDied(event.player);
-                engine.finishTurn();
-                lastDeath = event.player;
-            }
-            else
-            {
-                engine.updateStep(*event.action);
-            }
+        if (event.player != engine.getState().currentPlayer)
+        {
+            throw invalid_argument("Game event does not match the scheduled player");
+        }
+
+        if (event.type == GameEventType::Death)
+        {
+            engine.playerDied(event.player);
+            engine.finishTurn();
+            lastDeath = event.player;
+        }
+        else
+        {
+            engine.updateStep(*event.action);
+        }
+    }
+}  //----- end of playGame
+
+
+//----------------------------------------------------------------- PUBLIC
+//--------------------------------------------------------- Public Methods
+int main(int argc, char **argv)
+// Algorithm : Select a play policy, load neural weights when requested, and run the competition protocol.
+{
+    try
+    {
+        string_view mode = argc == 1 ? "minimax" : argv[1];
+        bool minimax = mode == "minimax" && argc <= 2;
+        bool dqn = mode == "dqn" && argc == 3;
+        bool hybrid = mode == "hybrid" && argc == 4;
+        if (!minimax && !dqn && !hybrid)
+        {
+            throw invalid_argument("Usage: AI [minimax | dqn CHECKPOINT | hybrid CHECKPOINT LAMBDA]");
+        }
+
+        optional<float> hybridWeight;
+        if (hybrid)
+        {
+            hybridWeight = parseHybridWeight(argv[3]);
+        }
+
+        GameConfig config = InputHandler::readGameConfig();
+        auto origins = InputHandler::readPlayersOrigins(config.N);
+        GameEngine engine(config, origins);
+
+        if (minimax)
+        {
+            MinimaxAgent agent(MinimaxParams{});
+            playGame(engine, agent);
+        }
+        else
+        {
+            DQN learner(makeApplicationModelConfig(config.N), mt19937{});
+            ModelPersistence{}.loadDQN(learner, argv[2]);
+            auto agent = makeNeuralAgent(learner, hybridWeight, false);
+            playGame(engine, *agent);
         }
     }
     catch (const exception &error)

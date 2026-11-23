@@ -38,6 +38,9 @@ build/tests/dqn-agent: tests/DQNAgentTests.cpp $(TEST_DQN) src/Agent/DQNAgent.cp
 build/tests/hybrid-agent: tests/HybridAgentTests.cpp $(TEST_DQN) $(TEST_MINIMAX) src/Agent/HybridAgent.cpp
 build/tests/persistence: tests/PersistenceTests.cpp $(TEST_DQN) src/DQN/ModelPersistence.cpp
 build/tests/result-validation: tests/ResultValidationTests.cpp $(TEST_DQN) src/Agent/DQNAgent.cpp src/DQN/ResultValidation.cpp
+build/tests/training-loop: tests/TrainingLoopTests.cpp $(TEST_ENGINE) $(TEST_ENCODING) src/TrainingLoop.cpp src/DQN/Reward.cpp
+build/tests/training-cli: TEST_FLAGS += -DTRAIN_EXECUTABLE=\"$(CURDIR)/train\" -DSNAKE_EXECUTABLE=\"$(CURDIR)/AI\"
+build/tests/training-cli: tests/TrainingCliTests.cpp | train AI
 
 build/tests/%: tests/TestMain.cpp $(TEST_HEADERS) | build/tests
 	$(CXX) $(TEST_FLAGS) $(TEST_INCLUDES) $(filter %.cpp,$^) -o $@

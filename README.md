@@ -8,14 +8,10 @@ rejects risky attacks. The animation shows which policy selected each move.*
 
 ## Overview
 
-The playable C++ baseline uses `MinimaxAgent` with alpha-beta search. It scores
-legal moves by exploring copies of the live game state, using territory and risk
-estimates at the search horizon. The executable requires no model weights or
-external C++ libraries and speaks the [INSAlgo Snake Competition protocol](https://github.com/INSAlgo/Concours-Snake).
-
-The refactor has reached checkpoint 2 and completed standalone DQN integration.
-Neural and hybrid agents, model persistence, training, and parameter optimization
-are later stages of the target architecture.
+The C++ player speaks the [INSAlgo Snake Competition protocol](https://github.com/INSAlgo/Concours-Snake).
+Its default Minimax agent scores legal moves with alpha-beta search and territory
+and risk estimates. The player also supports DQN and Hybrid policies backed by
+checkpoints produced by the training executable.
 
 ---
 
@@ -278,8 +274,8 @@ Deep reinforcement learning approach:
 
 ## Usage
 
-Build `AI` with GNU Make and a C++17 compiler, then pass it to the local match
-runner. For example, play both seats on a 6×4 board with growth every round.
+Build `AI` and `train` with GNU Make and a C++17 compiler. Pass `AI` to the local
+match runner to play both seats on a 6×4 board with growth every round.
 
 ```sh
 make
@@ -293,19 +289,77 @@ score ties in `Action` enum order. A trapped player exits without emitting a
 direction, which the local runner reports as a timeout. Opponent deaths consume
 their scheduled slot, including when a collision also sends a move notification.
 
+To use a checkpoint, start `AI` with one of these argument lists and supply the
+same competition input stream. Neural play uses greedy actions with exploration
+disabled. The checkpoint must match the CLI model configuration for the number
+of players in the match.
+
 ```sh
-make test TEST="--checkpoint 2"
+./AI dqn model.model
+./AI hybrid model.model 0.5
 ```
 
-Checkpoint 2 runs the engine, protocol, observation, state analysis, spatial
-analysis and Minimax suites. The game-loop suite drives the built `AI` with
-recorded protocol input, including a position with a unique winning move.
+`0.5` gives equal weight to the normalized Minimax and neural scores. Hybrid
+weights range from `0` for Minimax scores to `1` for neural scores.
+
+### Training and validation
+
+`training.txt` contains one setup in competition format. It gives the board
+width and height, growth period, player count and one-based learner seat,
+followed by each seat's zero-based origin. For example:
+
+```text
+4 1
+1
+2 1
+0 0
+3 0
+```
+
+`validation.txt` contains one or more setups in the same format, concatenated
+without event lines. It may use different boards, origins and learner seats
+while keeping the player's model input compatible by using the same number of
+players. For example, use two held-out 3×1 setups with origins `0 0` and `2 0`
+and swap the learner seat between them. Minimax plays all other seats in both
+training and validation.
+
+```sh
+./train 10 training.txt validation.txt model.model
+./train 10 training.txt validation.txt model.model --resume
+./train 10 training.txt validation.txt hybrid.model --hybrid 0.5
+```
+
+Each episode starts from the training setup. The learner explores during
+training and updates replay once per executed learner decision. A transition
+includes the intervening opponent turns and ends at the next learner decision
+or termination. Validation disables exploration and reports wins, win rate and
+mean survival turns over the supplied matches.
+
+Defaults are batch size 32, learning rate `0.00001`, target synchronization
+every 100 updates, and saving and evaluation every 10 episodes. Set these with
+`--batch-size N`, `--learning-rate RATE`, `--target-every UPDATES`,
+`--save-every EPISODES` and `--evaluate-every EPISODES`. Saving and evaluation
+also run after the final episode. `--seed N` sets the initial model and
+training RNG seed, which defaults to 5489 for a fresh run.
+
+`--resume` restores the learner, target networks, replay, exploration and RNG
+state, and the absolute update counter. It starts a fresh episode, and the
+save and evaluation intervals count episodes in the current invocation. Pass
+the same training settings when continuing a run.
+
+```sh
+make test TEST="--checkpoint 3"
+make test
+```
+
+Checkpoint 3 covers numerical gradient checks, replay training, checkpoint
+continuation and evaluation. Its executable tests train and resume DQN,
+compare checkpoints with uninterrupted training, and play protocol input
+using DQN and Hybrid.
 
 
 ## todo:
-- Connect the neural and hybrid agents to DQN.
 - finish optimise.cpp
-- finish train.cpp
 
 - optimise terminal state detection in Minimax (multiple methods and don't use the alive state)
 - optimise Minimax using transition table
