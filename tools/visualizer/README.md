@@ -34,8 +34,8 @@ frame; replay controls pause playback, not the match. Human controls are availab
 only while following live. The server stays open after the match for inspection.
 Ctrl+C stops the session and saves the recorded frames.
 
-A bot must speak the competition protocol. This viewer does not fix or replace
-unfinished C++ agents. `random` is a demo baseline, not Minimax or DQN.
+A bot must speak the competition protocol. `random` samples uniformly from legal
+moves as a demo baseline.
 
 ## Metrics and visual conventions
 
@@ -76,9 +76,8 @@ Each match launches fresh bot processes. **This is evaluation recording, not a
 training loop:** no learning or model checkpoint loading is added here. Sampling
 controls files saved; metrics are still collected during every match.
 
-When the C++ training loop is implemented, it can export the same version 1 JSON
-once every 100 episodes. The browser does not depend on the producer. The
-`Recorder.observe()` implementation defines the format:
+The viewer reads version 1 replay JSON. Live and headless matches use
+`Recorder.observe()` to produce this format.
 
 - Root: `version`, `width`, `height`, `growth`, `names`, `frames`, `finished`, `error`.
 - Frame: completed slot count `turn`, next-turn `round`, ordered `players`, `event`.

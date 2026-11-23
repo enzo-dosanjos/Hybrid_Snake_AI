@@ -1,7 +1,7 @@
 # Compilation variables
 CXX = g++
 CXXFLAGS = -pedantic -Wall -std=c++17
-CXXFLAGS_DEBUG = -pedantic -Wall -std=c++17 -g -DMAP
+CXXFLAGS_DEBUG = $(CXXFLAGS) -g
 TARGET = AI
 BUILD_DIR := build
 

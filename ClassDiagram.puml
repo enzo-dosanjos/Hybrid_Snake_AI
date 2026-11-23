@@ -9,6 +9,25 @@ package "Shared contracts" {
         Down = 3
     }
 
+    class GameConfig <<value>> {
+        + W : int
+        + H : int
+        + M : int
+        + N : int
+        + P : int
+    }
+
+    class PlayersData <<value>> {
+        + snake : deque<Coord>
+        + playerInfo : PlayersInfo
+    }
+
+    class PlayersInfo <<value>> {
+        + origin : Coord
+        + alive : bool
+        + actionMask : ActionMask
+    }
+
     class GameState <<value>> {
         + config : GameConfig
         + players : Players
@@ -20,7 +39,7 @@ package "Shared contracts" {
     class EncodedState <<value>> {
         + board : BoardTensor
         + extraFeatures : vector<float>
-        + legalActions : bitset<4>
+        + legalActions : ActionMask
     }
 
     class Transition <<value>> {
@@ -33,7 +52,8 @@ package "Shared contracts" {
 
     note bottom of GameState
         Players maps stable IDs 1..N to PlayersData.
-        PlayersData contains snake coordinates and alive status.
+        GameConfig stores width, height, growth period, player count and controlled seat.
+        PlayersData stores head-to-tail coordinates and player metadata.
         GameState is a complete, independently copyable snapshot.
         currentPlayer and round identify the next scheduled turn.
         Histories are bounded and copied with the state.
@@ -50,7 +70,7 @@ package "Shared contracts" {
         FeatureSelection enables derived distance, size, progress, mobility
         and wall-proximity groups. Histories are diagnostic, not model inputs.
         Both schemas and feature selection must be checked when loading weights.
-        Action values and masks use the Action enum order.
+        ActionMask is a bitset of four directions in Action enum order.
     end note
 }
 
@@ -61,11 +81,12 @@ package "GameEnginePackage" {
         + GameEngine(config : GameConfig, origins : vector<Coord>)
         + GameEngine(snapshot : GameState)
         + getState() : const GameState&
-        + getActionMask(player : int) : bitset<4>
+        + getActionMask(player : int) : ActionMask
         + updateStep(action : Action) : void
         + playerDied(player : int) : void
         + finishTurn() : void
         + isAlive(player : int) : bool
+        + willDieNextTurn(player : int) : bool
         + isTerminalState() : bool
         + isTerminalFor(player : int) : bool
         + successor(action : Action) : GameEngine
@@ -77,16 +98,18 @@ package "GameEnginePackage" {
 
     note bottom of GameEngine
         Sole authority for movement, collision, growth and death.
-        updateStep applies the current player's move, then finishes
-        its turn; an illegal move eliminates that player.
-        With no legal action, mark dead and finish the turn.
-        playerDied is idempotent and does not advance time.
+        updateStep applies the current living player's action and advances
+        the schedule. A direction blocked by a collision eliminates the player.
+        An invalid Action value or a move in a terminal game is rejected.
+        With no legal action, callers can mark dead and finish the turn.
+        playerDied is idempotent and leaves the schedule unchanged.
         finishTurn advances the scheduled slot, including dead slots;
         round increments when the schedule wraps from N to 1.
         Global terminal: at most one survivor.
         Terminal for p: global terminal or p has died.
         successor copies the entire engine and calls updateStep.
-        Dead bodies follow the competition's occupancy rules.
+        On growth rounds (including round zero), the tail stays in place.
+        Retained dead bodies continue to occupy their cells.
     end note
 
     class Observation {
@@ -94,28 +117,32 @@ package "GameEnginePackage" {
     }
 
     class StateAnalyzer {
-        + computeExtraFeatures(state : GameState, perspective : int) : vector<float>
+        + computeExtraFeatures(state : GameState, perspective : int, selection : FeatureSelection) : vector<float>
+        + {static} getFeatureCount(numPlayers : int, selection : FeatureSelection) : int
         + computeSpatialMetrics(state : GameState, perspective : int) : vector<float>
         + computeGrowthSizeMetrics(state : GameState, perspective : int) : vector<float>
         + computeGameProgress(state : GameState) : float
         + computeGameplayMetrics(state : GameState, perspective : int) : vector<float>
-        + computeActionEntropy(moves : deque<Action>) : float
-        + computeKillZoneProximity(head : Coord, config : GameConfig) : float
+    }
+
+    class DecisionEncoding <<module>> {
+        + encodeDecision(engine : const GameEngine&, player : int, features : const FeatureSelection&) : EncodedState
     }
 
     class InputHandler {
-        + readGameConfig() : GameConfig
-        + readPlayersOrigins(numPlayers : int) : vector<Coord>
-        + readEvent() : GameEvent
-        + writeMove(move : Action) : void
+        + {static} readGameConfig(input : istream&) : GameConfig
+        + {static} readPlayersOrigins(numPlayers : int, input : istream&) : vector<Coord>
+        + {static} readEvent(numPlayers : int, input : istream&) : GameEvent
+        + {static} writeMove(move : Action, output : ostream&) : void
     }
 
     note bottom of InputHandler
-        GameEvent is a tagged Move(player, action), Death(player),
-        End or InputError value; external IDs are normalized once.
+        GameEvent carries a type, normalized player ID, optional action and error text.
+        The controlled seat in setup is already one-based.
+        The reader converts zero-based event player IDs to one-based IDs.
         The game loop applies events using their supplied player ID
         and reconciles them with the engine's scheduled turn.
-        Multiple notifications for a turn must not advance it twice.
+        A paired death and move notification advances the schedule once.
     end note
 }
 
@@ -132,7 +159,8 @@ package "DQNPackage" {
         + addLayer(config : ConvLayerConfig) : void
         + copyWeights(src : CNN) : void
         + forwardPropagation(input : BoardTensor) : FeatureTensor
-        + globalAvgPooling(input : FeatureTensor) : vector<float>
+        + {static} globalAvgPooling(input : FeatureTensor) : vector<float>
+        + {static} globalAvgPoolingBackward(pooledGradient : vector<float>, input : FeatureTensor) : FeatureTensor
         + backPropagation(error : FeatureTensor) : void
     }
 
@@ -161,16 +189,18 @@ package "DQNPackage" {
         - targetCNN : CNN
         - targetFCNN : FCNN
         - replayBuffer : ReplayBuffer
+        - config : ModelConfig
         - epsilon : float
-        - gamma : float
+        - gen : mt19937
         + DQN(config : ModelConfig, gen : mt19937)
         + selectAction(state : EncodedState, explore : bool) : optional<Action>
+        + sampleExplorationAction(legalActions : ActionMask) : optional<Action>
         + forwardPropagation(state : EncodedState) : array<float, 4>
         + remember(transition : Transition) : void
         + train(batchSize : int, learningRate : float) : void
         + updateTargetNetworks() : void
-        - spreadError(pooledGradient : vector<float>, shape : TensorShape) : FeatureTensor
-        - combineFeatures(pooled : vector<float>, extras : vector<float>) : vector<float>
+        + getFeatureSelection() : const FeatureSelection&
+        - bellmanTarget(transition : Transition) : float
         - decayEpsilon() : void
     }
 
@@ -178,7 +208,8 @@ package "DQNPackage" {
         ModelConfig defines N, feature schema, layer shapes,
         replay capacity, gamma and exploration parameters.
         Target networks start as copies of the online networks.
-        Targets use only legal next actions; no bootstrap when done.
+        Targets bootstrap over legal next actions when the transition
+        continues and the next mask has at least one legal action.
         Gradient from the pooled part of the FCNN input is distributed
         through average pooling into CNN backpropagation.
         Raw Q-values remain unnormalized for Bellman learning.
@@ -200,19 +231,22 @@ package "DQNPackage" {
     end note
 
     class Reward {
+        - config : GameConfig
         - rewards : NNRewards
+        + Reward(config : GameConfig)
         + computeReward(previous : GameState, next : GameState, player : int) : float
     }
 
     note bottom of Reward
         Award the setup bonus when a surviving opponent goes from
         more than two legal moves to two or fewer across the interval.
-        Credit observed alive-to-dead transitions once; predicted deaths earn no bonus.
-        Award a sole-survivor win once without duplicating the final elimination reward.
+        Credit observed alive-to-dead transitions once.
+        A sole-survivor win includes the final elimination payoff.
+        Death or an empty learner mask with surviving opponents yields a loss.
     end note
 
     class ModelPersistence {
-        + saveDQN(dqn : DQN, filename : string, trainingStep : int) : void
+        + saveDQN(dqn : const DQN&, filename : string, trainingStep : int) : void
         + loadDQN(dqn : DQN&, filename : string) : int
     }
 
@@ -222,6 +256,18 @@ package "DQNPackage" {
         Load validates compatibility and restores trainingStep.
     end note
 
+    class ValidationMatch <<value>> {
+        + config : GameConfig
+        + origins : vector<Coord>
+        + opponents : vector<reference_wrapper<Agent>>
+    }
+
+    class ValidationResult <<value>> {
+        + matches : size_t
+        + wins : size_t
+        + meanSurvivalTurns : double
+    }
+
     class ResultValidation {
         + validate(agent : Agent&, validationSet : vector<ValidationMatch>) : ValidationResult
         + calculateScore(result : ValidationResult) : float
@@ -229,9 +275,11 @@ package "DQNPackage" {
 
     note bottom of ResultValidation
         Callers supply the board, origins, evaluated seat and opponents.
-        All agents use evaluation mode. Score is the fraction of matches won.
-        Mean survival counts living turns through the evaluated player's
-        death or the end of the game.
+        Callers supply agents with exploration disabled.
+        Opponents are in ascending seat order, omitting the evaluated seat.
+        Score is the fraction of matches won.
+        Mean survival counts living players' turns through the evaluated
+        player's death or the end of the game.
     end note
 }
 
@@ -242,8 +290,7 @@ package "AgentPackage" {
 
     class DQNAgent {
         - dqn : DQN&
-        - observation : Observation
-        - analyzer : StateAnalyzer
+        - explore : bool
         + DQNAgent(dqn : DQN&, explore : bool)
         + selectAction(engine : const GameEngine&) : optional<Action>
     }
@@ -257,8 +304,7 @@ package "AgentPackage" {
     class HybridAgent {
         - dqn : DQN&
         - minimax : Minimax
-        - observation : Observation
-        - analyzer : StateAnalyzer
+        - explore : bool
         - lambda : float
         + HybridAgent(dqn : DQN&, params : MinimaxParams, lambda : float, explore : bool)
         + selectAction(engine : const GameEngine&) : optional<Action>
@@ -278,8 +324,8 @@ package "AgentPackage" {
         (equal scores map to 0), then maximize:
         (1-lambda) * minimaxScore + lambda * qValue.
         Training exploration may instead choose a random legal action.
-        This weighting is a decision rule, not a survival guarantee.
-        DQNAgent/HybridAgent borrow a DQN that outlives them.
+        Ties follow Action enum order.
+        DQNAgent and HybridAgent borrow a DQN that outlives them.
     end note
 }
 
@@ -289,7 +335,7 @@ package "MinimaxPackage" {
         - analyzer : SpaceRiskAnalyzer
         + calculateMoveScores(engine : const GameEngine&) : map<Action, float>
         - evaluateState(state : GameState, rootPlayer : int) : float
-        - minimax(engine : GameEngine, depth : int, alpha : float, beta : float, rootPlayer : int) : float
+        - minimax(engine : const GameEngine&, depth : int, alpha : float, beta : float, rootPlayer : int) : float
     }
 
     note bottom of Minimax
@@ -299,12 +345,14 @@ package "MinimaxPackage" {
         Search copies complete states and uses engine transitions.
         Dead slots and no-legal-action deaths follow engine rules.
         Score every legal root action with a fresh full search window
-        so hybrid combination receives values, not pruning bounds.
+        so hybrid combination receives each action's search value.
     end note
 
     class SpaceRiskAnalyzer {
-        - maxLookAhead : int
+        - maxLookahead : int
         - decayFactor : float
+        - decayTable : vector<float>
+        + SpaceRiskAnalyzer(lookahead : int, decay : float)
         + analyzeState(state : GameState, player : int) : SpaceRiskResult
         + computeReachTiming(state : GameState) : ReachTiming
         + calculateAreas(state : GameState) : AreaResult
@@ -314,34 +362,40 @@ package "MinimaxPackage" {
 
     note bottom of SpaceRiskAnalyzer
         Matrices use [y][x]. Reach timing is tracked per player/cell.
-        Static occupancy analysis is a heuristic, not proof of safety.
-        Any cache key includes all state/configuration used by analysis.
+        Each analysis recomputes reach and territory from the snapshot.
+        Snake bodies are held fixed, including tails and dead bodies.
+        Risk uses scheduled arrivals and a precomputed decay table.
     end note
 }
 
 package "Application" {
-    class GameLoop <<control>> {
-        + run(agent : Agent&, io : InputHandler&) : void
+    class "AI" as Play <<executable>> {
+        - playGame(engine : GameEngine&, agent : Agent&) : void
     }
 
-    class TrainingLoop <<control>> {
-        + train(behavior : Agent&, learner : DQN&, config : TrainingConfig) : void
+    class "train" as Train <<executable>> {
+        - runTraining(config : const TrainingConfig&) : void
+    }
+
+    note bottom of Train
+        train.cpp owns the learner and constructs behavior and evaluation agents.
+        Schedules replay updates, target synchronization, saves and evaluation.
+    end note
+
+    class TrainingLoop <<module>> {
+        + playLearnerDecision(engine : GameEngine&, behavior : Agent&, opponents : vector<reference_wrapper<Agent>>, reward : Reward, features : FeatureSelection) : optional<Transition>
     }
 
     note bottom of TrainingLoop
-        Control roles may be implemented as functions.
-        Runs episodes and opponent turns through GameEngine.
-        Builds transitions from one learner decision to its next,
-        or to its death/game end; stores the action actually executed.
-        Reward covers that complete interval; gamma is per decision.
-        Rules, identities and turn context are encoded by the shared encoders.
+        Returns a transition spanning one executed learner action and
+        intervening opponent turns through the next decision or termination.
+        Reward covers the interval and gamma is per learner decision.
         done also covers an empty next legal-action mask.
-        Owns the DQN borrowed by the behavior agent, schedules replay
-        training/target synchronization and invokes persistence/validation.
+        If the learner cannot execute an action, returns no transition.
     end note
 
-    class Optimise <<control>> {
-        + optimise(config : OptimiseConfig, validationSet : vector<ValidationMatch>) : Individual
+    class "optimise" as Optimise <<executable>> {
+        - optimise(config : OptimiseConfig, validationSet : vector<ValidationMatch>) : Individual
     }
 
     note bottom of Optimise
@@ -350,7 +404,7 @@ package "Application" {
         Save the winning weights and depth.
     end note
 
-    class MinimaxParamsFile <<utility>> {
+    class MinimaxParamsFile <<module>> {
         + loadMinimaxParams(filename : string) : MinimaxParams
         + saveMinimaxParams(params : MinimaxParams, filename : string) : void
     }
@@ -361,7 +415,9 @@ package "Application" {
 }
 
 class Utils <<utility>> {
+    + validateGameConfig(config : GameConfig) : void
     + isInbound(coord : Coord, config : GameConfig) : bool
+    + computeKillZoneProximity(head : Coord, config : GameConfig) : float
     + computeOppositeDir(move : Action) : Action
     + computeNewCoord(head : Coord, move : Action) : Coord
 }
@@ -373,6 +429,9 @@ NeuralNetwork <|-- CNN
 NeuralNetwork <|-- FCNN
 GameEngine *-- GameState
 GameEngine *-- PlayerSelector
+GameState *-- GameConfig
+GameState *-- "1..*" PlayersData
+PlayersData *-- PlayersInfo
 GameEngine ..> Utils
 Observation ..> GameState
 StateAnalyzer ..> GameState
@@ -383,32 +442,40 @@ ReplayBuffer *-- "0..*" Transition
 Transition *-- "2" EncodedState
 DQNAgent --> DQN : borrows
 HybridAgent --> DQN : borrows
-DQNAgent ..> Observation
-DQNAgent ..> StateAnalyzer
-HybridAgent ..> Observation
-HybridAgent ..> StateAnalyzer
+DQNAgent ..> DecisionEncoding
+HybridAgent ..> DecisionEncoding
+DecisionEncoding ..> GameEngine
+DecisionEncoding ..> Observation
+DecisionEncoding ..> StateAnalyzer
 MinimaxAgent *-- Minimax
 HybridAgent *-- Minimax
 Minimax *-- SpaceRiskAnalyzer
 Minimax ..> GameEngine : simulates copies
-GameLoop ..> GameEngine
-GameLoop ..> Agent
-GameLoop ..> InputHandler
+Play ..> GameEngine
+Play ..> Agent
+Play ..> InputHandler
+Play ..> ModelPersistence : loads checkpoint
+Play ..> MinimaxParamsFile : loads parameters
+Train ..> InputHandler
+Train ..> GameEngine
+Train ..> Agent
+Train *-- DQN : owns learner
+Train ..> TrainingLoop
+Train ..> ModelPersistence
+Train ..> ResultValidation
+Train ..> MinimaxParamsFile : loads parameters
 TrainingLoop ..> GameEngine
 TrainingLoop ..> Agent
-TrainingLoop ..> DQN
-TrainingLoop ..> Observation
-TrainingLoop ..> StateAnalyzer
+TrainingLoop ..> DecisionEncoding
 TrainingLoop ..> Reward
-TrainingLoop ..> ModelPersistence
-TrainingLoop ..> ResultValidation
 ModelPersistence ..> DQN
+ResultValidation ..> ValidationMatch
+ResultValidation ..> ValidationResult
 ResultValidation ..> Agent
 ResultValidation ..> GameEngine
+Optimise ..> InputHandler
 Optimise ..> ResultValidation
 Optimise ..> MinimaxAgent
 Optimise ..> MinimaxParamsFile : saves winner
-GameLoop ..> MinimaxParamsFile : optional startup load
-TrainingLoop ..> MinimaxParamsFile : optional startup load
 
 @enduml

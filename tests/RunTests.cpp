@@ -63,31 +63,6 @@ int runCommand(const vector<string> &arguments)
 }  //----- end of runCommand
 
 
-// todo: remove after refactoring
-vector<string> checkpointSuites(const string &checkpoint)
-// Algorithm : Selects temporary refactoring groups without introducing checkpoint dependencies into component tests.
-{
-    // Temporary refactoring groups; component suites remain independent.
-    if (checkpoint == "1")
-    {
-        return {"game-engine", "input-handler", "game-loop", "observation", "state-analyzer"};
-    }
-
-    if (checkpoint == "2")
-    {
-        return {"game-engine", "input-handler", "game-loop", "observation", "state-analyzer", "space-risk-analyzer", "minimax"};
-    }
-
-    if (checkpoint == "3")
-    {
-        return {"cnn", "fcnn", "replay-buffer", "reward", "dqn", "dqn-agent", "hybrid-agent",
-                "persistence", "result-validation", "training-loop", "training-cli"};
-    }
-
-    throw invalid_argument("Checkpoint must be 1, 2 or 3");
-}  //----- end of checkpointSuites
-
-
 int main(int argc, char **argv)
 // Algorithm : Builds and runs selected component suites while reporting compilation failures separately from test failures.
 {
@@ -110,12 +85,7 @@ int main(int argc, char **argv)
 
     try
     {
-        // todo: remove after refactoring
-        if (argc == 3 && string(argv[1]) == "--checkpoint")
-        {
-            selected = checkpointSuites(argv[2]);
-        }
-        else if (argc == 2 && string(argv[1]) != "all")
+        if (argc == 2 && string(argv[1]) != "all")
         {
             bool found = false;
 
@@ -133,7 +103,7 @@ int main(int argc, char **argv)
         }
         else if (argc > 2)
         {
-            throw invalid_argument("Use: RunTests [component | all | --list | --checkpoint N]");
+            throw invalid_argument("Use: RunTests [component | all | --list]");
         }
     }
     catch (const exception &error)
