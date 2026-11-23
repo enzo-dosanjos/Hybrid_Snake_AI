@@ -4,48 +4,17 @@
 
 *Illustrative hybrid match: two players grow every three rounds. An offensive
 heuristic tries to cut off the opponent; six-ply Minimax checks survival and
-rejects risky attacks. The animation shows which policy selected each move.
+rejects risky attacks. The animation shows which policy selected each move.*
 
 ## Overview
 
-![PROJECT UNDER REFACTORING — The test suite currently fails and the hybrid AI is not operational.](docs/images/refactoring-status.svg)
+The playable C++ baseline uses `MinimaxAgent` with alpha-beta search. It scores
+legal moves by exploring copies of the live game state, using territory and risk
+estimates at the search horizon. The executable requires no model weights or
+external C++ libraries and speaks the [INSAlgo Snake Competition protocol](https://github.com/INSAlgo/Concours-Snake).
 
-This is an advanced AI system for playing a multiplayer Snake games to participate in the [INSAlgo Snake Competition](https://github.com/INSAlgo/Concours-Snake)
-
-The project implements a combination of 2 AI approaches in C++ without using any external libraries:
-1. **Minimax Algorithm with Alpha-Beta Pruning**  
-   *Focus: Defense & Survival*
-  - **Self-preservation:** Avoids self-blocking by ensuring safe moves.
-  - **Defensive Search:** Evaluates moves to trap or force the opponent into a dangerous position.
-  - **Dynamic Evaluation:** Adjusts search based on board size and game state.
-
-2. **Deep Q-Learning (DQN) with Convolutional & Fully Connected Neural Networks**  
-   *Focus: Offense & Adaptability*
-  - **Risk-Taking:** Learns to exploit opportunities and take calculated risks.
-  - **Adaptive Strategy:** Adapts to opponent behavior and varying map sizes.
-  - **Feature Extraction:** Uses a CNN to visually process the game board and an FCNN to make decisions based on combined features.
-
----
-
-## Key Features
-
-- **Hybrid AI Strategies:**
-  - **Minimax with Alpha-Beta Pruning:** Guarantees defensive play and trap-setting.
-  - **Deep Q-Network (DQN):** Combines CNN for board analysis with FCNN for decision making.
-  - **Hybrid Integration:** Leverages the strengths of both approaches for optimal performance.
-
-- **Advanced Spatial Risk Analysis:**
-  - Dynamic risk heatmaps and multi-source flood fill algorithms for area control.
-  - Temporal-spatial risk assessment to evaluate movement dangers.
-
-- **Sophisticated Reward System:**
-  - Legacy rewards based on outcomes, survival and opponent constraints; integration is being refactored.
-  - Tailored metrics that adjust for board size and dynamic game scenarios.
-
-- **Robust Training & Validation Tools:**
-  - Experience replay buffer for stable training.
-  - Tools for saving/loading models and performance analytics.
-  - Integrated validation routines to analyze victories, survival turns, rewards, Q-value consistency, and action entropy.
+The refactor has reached checkpoint 2. DQN, hybrid play, training, and parameter
+optimization are later stages of the target architecture.
 
 ---
 
@@ -144,23 +113,16 @@ flowchart TD
 ## Project Structure
 
 ```
-├── include/
-│   ├── CNN.h               # Convolutional neural network
-│   ├── FCNN.h              # Fully connected neural network
-│   ├── Minimax.h           # Minimax algorithm with alpha-beta pruning
-│   ├── NNAI.h              # Combination of CNN and FCNN for AI
-│   ├── ReplayBuffer.h      # Replay buffer for deep Q-Learning
-│   ├── SpaceRiskAnalyzer.h # Spatial risk assessment
-│   ├── Structs.h           # Data structures
-│   └── Utils.h             # Utility functions
+├── main.cpp                # Competition protocol loop
+├── snake.py                # Local competition runner
 ├── src/
-│   ├── CNN.cpp               # Implementation of a convolutional neural network
-│   ├── FCNN.cpp              # Implementation of a fully connected neural network
-│   ├── Minimax.cpp           # Implementation of a minimax algorithm with alpha-beta pruning
-│   ├── NNAI.cpp              # Implementation of the combination of CNN and FCNN for AI
-│   ├── ReplayBuffer.cpp      # Implementation of a replay buffer for deep Q-Learning
-│   ├── SpaceRiskAnalyzer.cpp # Implementation of a spatial risk assessment class
-│   └── Reward.cpp             # Implementation of utility functions
+│   ├── Agent/              # Action-selection interface and policies
+│   ├── GameEngine/         # Rules, input and observation encoding
+│   ├── Minimax/            # Alpha-beta search and spatial risk analysis
+│   ├── DQN/                # Neural networks and learning components
+│   ├── Structs.h           # Shared data structures
+│   └── Utils.h             # Shared helpers
+└── tests/                  # C++ component and executable tests
 ```
 
 ---
@@ -309,14 +271,33 @@ Deep reinforcement learning approach:
 
 
 ## Usage
-The main.cpp file provide 3 different main functions:
-- `gameMain` to play a game with the combination of both AI
-- `trainingMain` to train the neural network AI
-- `optimiseMain` to optimise the Minimax parameters
+
+Build `AI` with GNU Make and a C++17 compiler, then pass it to the local match
+runner. For example, play both seats on a 6×4 board with growth every round.
+
+```sh
+make
+python3 snake.py ./AI ./AI -g 6 4 -G 1
+```
+
+`AI` reads setup and opponent events from standard input and flushes one
+direction to standard output per playable turn. It uses the default Minimax
+configuration of eight scheduled slots, including the root action, and breaks
+score ties in `Action` enum order. A trapped player exits without emitting a
+direction, which the local runner reports as a timeout. Opponent deaths consume
+their scheduled slot, including when a collision also sends a move notification.
+
+```sh
+make test TEST="--checkpoint 2"
+```
+
+Checkpoint 2 runs the engine, protocol, observation, state analysis, spatial
+analysis and Minimax suites. The game-loop suite drives the built `AI` with
+recorded protocol input, including a position with a unique winning move.
 
 
 ## todo:
-- finish main.cpp
+- Connect the hybrid agent after DQN integration.
 - finish optimise.cpp
 - finish train.cpp
 

@@ -77,6 +77,17 @@ void testDeathAndMoveNotifications()
 }  //----- end of testDeathAndMoveNotifications
 
 
+void testMinimaxWinningLine()
+// Algorithm : Play a two-move win through the executable and check that it avoids the legal losing branch.
+{
+    // With growth every round, right loses after the opponent takes the bottom-left and bottom-middle cells.
+    // Down blocks the opponent's next exit and leaves us a move to the bottom-right cell.
+    auto result = playTranscript("3 2\n1\n2 1\n1 0\n0 0\nmove 1 down\ndeath 1\n");
+    check(result.first == 0 && result.second == "down\nright\n",
+          "Bot did not play the winning line through the scheduled opponent move");
+}  //----- end of testMinimaxWinningLine
+
+
 void testImmediateWinAndTrap()
 // Algorithm : Play forced corridor positions to verify winning moves remain alive and trapped bots exit without hanging.
 {
@@ -117,6 +128,7 @@ vector<TestCase> getTests()
 {
     return {
         {"death_and_move_notifications", testDeathAndMoveNotifications},
+        {"minimax_winning_line", testMinimaxWinningLine},
         {"immediate_win_and_trap", testImmediateWinAndTrap},
         {"end_of_input", testEndOfInput},
         {"invalid_protocol", testInvalidProtocol}

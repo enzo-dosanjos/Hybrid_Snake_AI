@@ -9,54 +9,44 @@ main - Plays the competition game
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
 #include <iostream>
-#include <random>
+#include <optional>
 #include <stdexcept>
-#include <vector>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
+#include "src/Agent/MinimaxAgent.h"
 #include "src/GameEngine/GameEngine.h"
 #include "src/GameEngine/InputHandler.h"
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
 int main()
-// Algorithm : Choose legal moves on our turns and apply external events once in scheduled-player order.
+// Algorithm : Use Minimax on our turns and apply external events once in scheduled-player order.
 {
     try
     {
         GameConfig config = InputHandler::readGameConfig();
         auto origins = InputHandler::readPlayersOrigins(config.N);
         GameEngine engine(config, origins);
-        mt19937 gen(random_device{}());
+        MinimaxAgent agent(MinimaxParams{});
         int lastDeath = 0;
 
         while (!engine.isTerminalFor(config.P))
         {
             if (engine.getState().currentPlayer == config.P)
             {
-                vector<Action> moves;
-                ActionMask mask = engine.getActionMask(config.P);
+                optional<Action> move = agent.selectAction(engine);
 
-                for (size_t action = 0; action < ACTIONS.size(); action++)
-                {
-                    if (mask[action])
-                    {
-                        moves.push_back(static_cast<Action>(action));
-                    }
-                }
-
-                if (moves.empty())
+                if (!move)
                 {
                     engine.playerDied(config.P);
+                    engine.finishTurn();
                     break;
                 }
 
-                uniform_int_distribution<size_t> choice(0, moves.size() - 1);
-                Action move = moves[choice(gen)];
-                InputHandler::writeMove(move);
-                engine.updateStep(move);
+                InputHandler::writeMove(*move);
+                engine.updateStep(*move);
                 continue;
             }
 
