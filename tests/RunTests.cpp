@@ -75,7 +75,7 @@ vector<string> checkpointSuites(const string &checkpoint)
 
     if (checkpoint == "2")
     {
-        return {"game-engine", "input-handler", "game-loop", "observation", "state-analyzer", "minimax"};
+        return {"game-engine", "input-handler", "game-loop", "observation", "state-analyzer", "space-risk-analyzer", "minimax"};
     }
 
     if (checkpoint == "3")
@@ -91,7 +91,7 @@ int main(int argc, char **argv)
 // Algorithm : Builds and runs selected component suites while reporting compilation failures separately from test failures.
 {
     vector<string> suites = {
-        "game-engine", "input-handler", "game-loop", "observation", "state-analyzer", "minimax",
+        "game-engine", "input-handler", "game-loop", "observation", "state-analyzer", "space-risk-analyzer", "minimax",
         "cnn", "fcnn", "replay-buffer", "dqn", "persistence"
     };
     vector<string> selected = suites;

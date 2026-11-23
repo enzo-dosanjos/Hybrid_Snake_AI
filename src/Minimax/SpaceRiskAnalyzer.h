@@ -1,126 +1,87 @@
 /*************************************************************************
-SpaceRiskAnalyzer - A spatial risk assessment system for grid-based games
+SpaceRiskAnalyzer - Spatial evaluation of complete game snapshots
                              -------------------
-    copyright            : (C) 2025 by Enzo DOS ANJOS
+    copyright            : (C) 2026 by Enzo DOS ANJOS
 *************************************************************************/
 
+//--- Interface of the module <SpaceRiskAnalyzer> (file SpaceRiskAnalyzer.h) ---
 #ifndef SPACERISKANALYZER_H
 #define SPACERISKANALYZER_H
 
 //------------------------------------------------------------------------
 // Role of the <SpaceRiskAnalyzer> module
-// The SpaceRiskAnalyzer module provides tools for analyzing spatial risks
-// in a grid-based game environment. It computes risk heatmaps showing
-// dangerous areas, calculates accessible space for each player, and
-// evaluates movement risks. The module helps the minimax algorithm to
-// make informed decisions.
+// Estimates territory and movement risk with fixed snake occupancy.
+// Results are heuristics; actual movement and growth belong to GameEngine.
+// Territory uses shortest path lengths, with equal-distance cells unassigned.
+// Risk compares scheduled arrivals, including the slots of dead players.
+// Matrices use [y][x]; player vectors use IDs 1..N with slot zero unused.
 //------------------------------------------------------------------------
 
 //-------------------------------------------------------- Used interfaces
-#include "GameEngine.h"
-#include "Reward.h"
-#include "Structs.h"
+#include "../Structs.h"
+
+//------------------------------------------------------------------ Types
+struct ReachTiming {
+    // Heads have arrival zero; other arrivals count scheduled slots from the snapshot.
+    // Missing player entries mean no path within the requested move horizon.
+    Matrix<std::unordered_map<int, long long>> slots;
+    int numPlayers = 0;
+};
+
+
+struct AreaResult {
+    std::vector<float> space;
+    std::vector<float> blockRisk;
+};
+
+
+struct SpaceRiskResult {
+    AreaResult areas;
+    Matrix<float> heatmap;
+};
+
 
 //----------------------------------------------------------------- PUBLIC
-class SpaceRiskAnalyzer
-{
+class SpaceRiskAnalyzer {
 //--------------------------------------------------------- Public Methods
     public:
-        std::pair<std::pair<std::vector<float>, std::vector<float>>, Matrix<float>> analyzeState(
-            const Players &playerState,
-            int currentPlayer
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        SpaceRiskResult analyzeState(const GameState &state, int player) const;
+        // Contract : Return territory and perspective risk without modifying or retaining the snapshot.
 
-        Matrix<float> calculateRiskHeatmap(
-            const int currentPlayer
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        ReachTiming computeReachTiming(const GameState &state) const;
+        // Contract : Return arrivals within maxLookahead moves per player; absent entries are unreachable.
 
-        std::pair<std::vector<float>, std::vector<float>> calculateAreas(
-            const Players &playerState,
-            const Matrix<bool> &occupied,
-            const Matrix<int> &heads
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        AreaResult calculateAreas(const GameState &state) const;
+        // Contract : Count nearest-player territory including living heads; equal distances are contested and dead slots are zero.
 
-        float calculateDirectionalRisk(
-            const Matrix<float> &heatmap,
-            Coord head
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        Matrix<float> calculateRiskHeatmap(const ReachTiming &timing, int player) const;
+        // Contract : Return decayed opponent pressure on cells reachable by the selected player.
+
+        float calculateDirectionalRisk(const Matrix<float> &heatmap, Coord head) const;
+        // Contract : Sum risk in the in-bounds orthogonal neighbors of the head.
 
 //---------------------------------------------- Constructors - destructor
-    SpaceRiskAnalyzer(
-            const GameConfig &p_config,
-            int lookahead = 5,
-            float decay = 0.7
-    ) : config(p_config),
-        maxLookahead(lookahead),
-        decayFactor(decay)
-    {
-        precomputeDecay();
-    }
-
-//-------------------------------------------------------------- PROTECTED
-    protected:
-        Matrix<std::unordered_map<int, int>> computeReachTiming(
-            const Players &playerState,
-            const Matrix<bool> &occupied
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        Matrix<int> precomputeCurrentPlayerTiming(
-            const Matrix<std::unordered_map<int, int>> &timingGrid,
-            int currentPlayer
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        std::pair<Matrix<bool>, Matrix<int>> precomputeOccupancy(
-            const Players &playerState
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void precomputeDecay();
-        // Usage :
-        //
-        // Contract :
-        //
+        explicit SpaceRiskAnalyzer(int lookahead = 5, float decay = 0.7f);
+        // Contract : Require nonnegative lookahead and finite decay in [0, 1].
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        GameConfig config;
+        std::pair<Matrix<bool>, Matrix<int>> precomputeOccupancy(const GameState &state) const;
+        // Contract : Validate geometry and mark all bodies occupied, with head IDs only for living players.
+
+        ReachTiming computeReachTiming(const GameState &state, const Matrix<bool> &occupied, int limit) const;
+        // Contract : Explore independently per living player; a negative limit explores all reachable cells.
+
+        AreaResult calculateAreas(const GameState &state, const Matrix<bool> &occupied,
+                                  const Matrix<int> &heads, const ReachTiming &timing) const;
+        // Contract : Assign distance-based territory from full reach data and average blocking pressure per owner.
+
+        void precomputeDecay();
+        // Contract : Store one decay multiplier for each move distance up to maxLookahead.
+
         int maxLookahead;
         float decayFactor;
         std::vector<float> decayTable;
-
-        // keep previous data to avoid recomputing the same data
-        Matrix<std::unordered_map<int, int>> lastReachData;
-        Players lastPlayerState;
-        Matrix<bool> lastOccupied;
-        Matrix<int> lastHeads;
 };
-
 
 #endif //SPACERISKANALYZER_H

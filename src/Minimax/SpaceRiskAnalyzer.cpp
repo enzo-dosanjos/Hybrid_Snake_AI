@@ -1,347 +1,370 @@
 /*************************************************************************
-SpaceRiskAnalyzer - A spatial risk assessment system for grid-based games
+SpaceRiskAnalyzer - Spatial evaluation of complete game snapshots
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
 
-// Implementation of the module <SpaceRiskAnalyzer> (file SpaceRiskAnalyzer.cpp)
+//--- Implementation of the module <SpaceRiskAnalyzer> (file SpaceRiskAnalyzer.cpp) ---
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
-#include <iostream>
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <queue>
+#include <stdexcept>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
-#include "../include/SpaceRiskAnalyzer.h"
+#include "SpaceRiskAnalyzer.h"
+#include "../Utils.h"
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-pair<pair<vector<float>, vector<float>>, Matrix<float>> SpaceRiskAnalyzer::analyzeState(const Players &playerState,
-                                                                                   const int currentPlayer)
-// Algorithm :
+SpaceRiskResult SpaceRiskAnalyzer::analyzeState(const GameState &state, int player) const
+// Algorithm : Build snapshot occupancy and reach data once, then derive territory and perspective risk.
 {
-    // check if computing occupancy and reach data is necessary
-    if(playerState != lastPlayerState) {
-        pair <Matrix<bool>, Matrix<int>> occupancy = precomputeOccupancy(playerState);
-        lastOccupied = occupancy.first;
-        lastHeads = occupancy.second;
+    auto occupancy = precomputeOccupancy(state);
 
-        lastReachData = computeReachTiming(playerState, lastOccupied);
-        lastPlayerState = playerState;
+    // Full reach data serves territory; the heatmap applies its own lookahead cutoff.
+    // Nothing is cached between calls, so simulated positions cannot reuse stale geometry.
+    auto timing = computeReachTiming(state, occupancy.first, -1);
+    auto areas = calculateAreas(state, occupancy.first, occupancy.second, timing);
+    auto heatmap = calculateRiskHeatmap(timing, player);
+    return {areas, heatmap};
+}  //----- end of analyzeState
+
+
+ReachTiming SpaceRiskAnalyzer::computeReachTiming(const GameState &state) const
+// Algorithm : Build occupancy and explore each living player's paths up to the configured move horizon.
+{
+    auto occupancy = precomputeOccupancy(state);
+    return computeReachTiming(state, occupancy.first, maxLookahead);
+}  //----- end of computeReachTiming
+
+
+AreaResult SpaceRiskAnalyzer::calculateAreas(const GameState &state) const
+// Algorithm : Explore the complete static board and assign cells by shortest distance, leaving ties contested.
+{
+    auto occupancy = precomputeOccupancy(state);
+    auto timing = computeReachTiming(state, occupancy.first, -1);
+    return calculateAreas(state, occupancy.first, occupancy.second, timing);
+}  //----- end of calculateAreas
+
+
+Matrix<float> SpaceRiskAnalyzer::calculateRiskHeatmap(const ReachTiming &timing, int player) const
+// Algorithm : Compare scheduled arrivals on reachable cells and apply the existing inverse-time risk and decay.
+{
+    if (timing.numPlayers <= 0 || player < 1 || player > timing.numPlayers || timing.slots.empty())
+    {
+        throw invalid_argument("Invalid reach timing or player perspective");
     }
 
-    // Calculate results using shared precomputed data
-    pair<vector<float>, vector<float>> areas = calculateAreas(playerState, lastOccupied, lastHeads);
-    Matrix<float> heatmap = calculateRiskHeatmap(currentPlayer);
+    int height = timing.slots.size();
+    int width = timing.slots.front().size();
+    Matrix<float> heatmap(width, height, 0.f);
 
-    return {areas, heatmap};
-}  // ----- End of analyzeState
-
-Matrix<float> SpaceRiskAnalyzer::calculateRiskHeatmap(const int currentPlayer)
-// Algorithm : For every cell, calculate the risk factor for the current player based on the timing
-// taken by other players to reach the cell. An exponential decay is applied the further the lookahead
-{
-    Matrix<float> heatmap(config.W, config.H, 0.0);
-
-    Matrix<int> currentTiming = precomputeCurrentPlayerTiming(lastReachData, currentPlayer);
-
-    for (int x = 0; x < config.W; x++)
+    for (int y = 0; y < height; y++)
     {
-        for (int y = 0; y < config.H; y++)
+        if (timing.slots[y].size() != static_cast<size_t>(width))
         {
-            float cellRisk = 0.0;
+            throw invalid_argument("Reach timing must be rectangular");
+        }
 
-            // Get timing for the current player
-            int timing = currentTiming[x][y];
+        for (int x = 0; x < width; x++)
+        {
+            const auto &arrivals = timing.slots[y][x];
+            auto own = arrivals.find(player);
 
-            for (const auto &timings : lastReachData[x][y])
+            // A cell with no own path contributes no directional pressure.
+            if (own == arrivals.end())
             {
-                // for every timing took for other players to reach the cell, compute the difference
-                // and add a risk factor inversely proportional to the difference
-                if (timings.first != currentPlayer)
-                {
-                    float diff = timings.second - timing;
-                    cellRisk += (diff <= 0) ? 1.0 / (abs(diff) + 1) : 1.0 / (timings.second + 1);
-                }
+                continue;
             }
 
-            // Apply exponential decay over lookahead steps
-            heatmap[x][y] = cellRisk * decayTable[min(timing, maxLookahead)];
+            // Ceil(slots / N) recovers move distance despite each player's turn offset.
+            long long moves = (own->second + timing.numPlayers - 1) / timing.numPlayers;
+
+            if (moves > maxLookahead)
+            {
+                continue;
+            }
+
+            float risk = 0.f;
+
+            for (const auto &[opponent, arrival] : arrivals)
+            {
+                long long opponentMoves = (arrival + timing.numPlayers - 1) / timing.numPlayers;
+
+                if (opponent == player || opponentMoves > maxLookahead)
+                {
+                    continue;
+                }
+
+                // Express time in round units to retain the old risk scale while resolving turn order.
+                float difference = float(arrival - own->second) / timing.numPlayers;
+                float opponentTime = float(arrival) / timing.numPlayers;
+                risk += difference <= 0.f ? 1.f / (abs(difference) + 1.f) : 1.f / (opponentTime + 1.f);
+            }
+
+            heatmap[y][x] = risk * decayTable[moves];
         }
     }
 
     return heatmap;
-}  // ----- End of calculateRiskHeatmap
+}  //----- end of calculateRiskHeatmap
 
-pair<vector<float>, vector<float>> SpaceRiskAnalyzer::calculateAreas(const Players &playerState,
-                                                            const Matrix<bool> &occupied, const Matrix<int> &heads)
-// Algorithm : Compute the accessible area of each players using a multi-source flood fill algorithm.
-// During the flood fill, the risk of being blocked by another player is computed by counting the
-// number of movements blocked by other players.
+
+float SpaceRiskAnalyzer::calculateDirectionalRisk(const Matrix<float> &heatmap, Coord head) const
+// Algorithm : Sum orthogonal neighbor risks using the supplied matrix dimensions rather than stored configuration.
 {
-    int numPlayer = playerState.size();
-
-    // matrix of the board containing:
-    // 0  : cell not reached
-    // i  : cell reached only by player i
-    // -1 : cell reached by multiple player
-    Matrix<int> visited(config.W, config.H, 0);
-    vector<deque<Coord>> queues(numPlayer + 1);
-
-    // Keep count of the number of reachable cells for each players
-    vector<float> space(numPlayer + 1, 0.0);
-    // Keep count of the neighbooring cells that could kill the player during the exploration
-    vector<float> blockRisk(numPlayer + 1, 0.0);
-
-    // initialise the queues with the player's head
-    for (int i = 1; i < numPlayer + 1; i++)
+    if (heatmap.empty() || heatmap.front().empty())
     {
-        Coord playerHead = playerState.at(i).snake.front();
-        queues[i].push_back(playerHead);
-        visited[playerHead.x][playerHead.y] = i;
+        throw invalid_argument("Risk heatmap must not be empty");
     }
 
+    int height = heatmap.size();
+    int width = heatmap.front().size();
 
-    bool progress = true;  // check if there's any progress (at least a neighboor is neither occupied nor already visited)
-    while (progress)
+    for (const auto &row : heatmap)
     {
-        progress = false;
-        for (int i = 1; i < numPlayer + 1; i++)
+        if (row.size() != static_cast<size_t>(width))
         {
-            deque<Coord> newQueue;  // create a temporary queue to avoid adding cells that will become contested
-            while (!queues[i].empty())
-            {
-                int x = queues[i].front().x;
-                int y = queues[i].front().y;
-
-                queues[i].pop_front();  // remove the cell from the queue
-
-                if (visited[x][y] != i)
-                {
-                    continue;  // if the cell was already reached by another player, we don't explore its neighboors
-                }
-
-                // For each neighbooring cells
-                float playerBlockRisk = 0.0;
-                int validDirections = 0;
-                for (auto direction : DIRECTIONS)
-                {
-                    int newX = x + direction.second.x;
-                    int newY = y + direction.second.y;
-
-                    if (gameEngine.isInbound(newX, newY))
-                    {
-                        validDirections++;
-                        // if the cell is not occupied by another snake
-                        if (!occupied[newX][newY])
-                        {
-
-                            // if the cell was never reached
-                            if (visited[newX][newY] == 0)
-                            {
-                                visited[newX][newY] = i;
-                                newQueue.push_back({newX, newY});
-                                progress = true;
-                            }
-                            // if the cell was already reached by at most one other player
-                            else if (visited[newX][newY] != i && visited[newX][newY] != -1)
-                            {
-                                visited[newX][newY] = -1;
-                                // the cell is now contested so we don't add it to the queue
-                                progress = true;
-                            }
-                        }
-                        // otherwise, it is a risk to get blocked by another player
-                        else
-                        {
-                            playerBlockRisk += 1.0;
-                            if (heads[newX][newY] != 0) {
-                                // Higher risk for opponent heads
-                                playerBlockRisk += (heads[newX][newY] == i) ? 0.5f : 2.0f;
-                            }
-                        }
-                    }
-                }
-
-                if (validDirections > 0)
-                {
-                    blockRisk[i] += playerBlockRisk / validDirections;   // Count adjacent blocked cells normalised
-                                                                         // by possible directions
-                }
-            }
-
-            queues[i] = newQueue;
+            throw invalid_argument("Risk heatmap must be rectangular");
         }
     }
 
-    // Count the reachable space of each player by checking the cells with their number
-    // the cells with -1 (contested cells) aren't counted as reachable
-    for (int x = 0; x < config.W; x++)
+    if (head.x < 0 || head.x >= width || head.y < 0 || head.y >= height)
     {
-        for (int y = 0; y < config.H; y++)
+        throw invalid_argument("Head outside risk heatmap");
+    }
+
+    float risk = 0.f;
+
+    for (const Coord &direction : DIRECTIONS)
+    {
+        int x = head.x + direction.x;
+        int y = head.y + direction.y;
+
+        if (x >= 0 && x < width && y >= 0 && y < height)
         {
-            if (visited[x][y] > 0)
-            {
-                int p = visited[x][y];
-                space[p] += 1.0;
-            }
+            risk += heatmap[y][x];
         }
     }
 
-    for (int i = 1; i < numPlayer + 1; i++)
-    {
-        if (space[i] > 0)
-        {
-            blockRisk[i] /= space[i];  // blockRisk take into account the available space to avoid moments
-                                       // when there's only one space available so the blockRisk is one
-        }
-        else
-        {
-            blockRisk[i] = 1.0;
-        }
-    }
-
-    return {space, blockRisk};
-}  // ----- End of calculateAreas
-
-
-float SpaceRiskAnalyzer::calculateDirectionalRisk(const Matrix<float> &heatmap, Coord head)
-// Algorithm : For a given cell, calculate the risk of moving in each direction by summing the risk
-// of the heatmap in the neighbooring cells
-{
-    float risk = 0.0;
-
-    // Evaluate risk for every directions
-    for (const auto &direction : DIRECTIONS)
-    {
-        int newX = head.x + direction.second.x;
-        int newY = head.y + direction.second.y;
-
-        if (gameEngine.isInbound(newX, newY))
-        {
-            risk += heatmap[newX][newY];
-        }
-    }
     return risk;
-}  // ----- End of calculateDirectionalRisk
+}  //----- end of calculateDirectionalRisk
 
 
-//-------------------------------------------------------------- PROTECTED
-Matrix<unordered_map<int, int>> SpaceRiskAnalyzer::computeReachTiming(const Players &playerState,
-                                                                      const Matrix<bool> &occupied)
-// Algorithm : Compute the timing grid for all players using a single BFS. The timing grid is a matrix
-// of unordered_map where each cell contains the timing taken by each player to reach the cell.
-// The BFS is stopped when the lookahead is reached.
+SpaceRiskAnalyzer::SpaceRiskAnalyzer(int lookahead, float decay)
+    : maxLookahead(lookahead), decayFactor(decay)
+// Algorithm : Validate the analysis horizon and decay before constructing the reusable decay table.
 {
-
-    Matrix<unordered_map<int, int>> timingGrid(config.W, config.H, unordered_map<int, int>());
-    Matrix<int> steps(config.W, config.H, -1);
-
-    queue<Coord> queue;  // Single BFS for all players to speed up the computation
-
-    // Initialize with all player heads
-    for (const auto& player : playerState)
+    if (lookahead < 0 || !isfinite(decay) || decay < 0.f || decay > 1.f)
     {
-        Coord head = player.second.snake.front();
-
-        if (steps[head.x][head.y] == -1)
-        {
-            steps[head.x][head.y] = 0;
-            timingGrid[head.x][head.y][player.first] = 0;
-
-            queue.push(head);
-        }
+        throw invalid_argument("Invalid spatial analysis parameters");
     }
 
-    // Unified BFS
-    while (!queue.empty())
+    precomputeDecay();
+}  //----- end of SpaceRiskAnalyzer
+
+
+//---------------------------------------------------------------- PRIVATE
+pair<Matrix<bool>, Matrix<int>> SpaceRiskAnalyzer::precomputeOccupancy(const GameState &state) const
+// Algorithm : Validate snapshot geometry and mark every retained segment, distinguishing living heads.
+{
+    const auto &config = state.config;
+    validateGameConfig(config);
+
+    if (state.currentPlayer < 1 || state.currentPlayer > config.N || state.round < 0 ||
+        state.players.size() != static_cast<size_t>(config.N))
     {
-        int x = queue.front().x;
-        int y = queue.front().y;
-        queue.pop();
-
-        for (const auto& dir : DIRECTIONS)
-        {
-            int newX = x + dir.second.x;
-            int newY = y + dir.second.y;
-
-            // check if the cell is inbound, not occupied and not visited
-            if (gameEngine.isInbound(newX, newY) && !occupied[newX][newY] && steps[newX][newY] == -1)
-            {
-                steps[newX][newY] = steps[x][y] + 1;  // add 1 to steps needed to reach the parent cell
-
-                // Propagate all players' timings
-                for (const auto &entry : timingGrid[x][y])
-                {
-                    timingGrid[newX][newY][entry.first] = steps[newX][newY];
-                }
-
-                // add the neighboors if the lookahead is not reached
-                if (steps[newX][newY] < maxLookahead)
-                {
-                    queue.push({newX, newY});
-                }
-            }
-        }
+        throw invalid_argument("Invalid spatial analysis snapshot");
     }
 
-    return timingGrid;
-}  // ----- End of computeReachTiming
-
-
-Matrix<int> SpaceRiskAnalyzer::precomputeCurrentPlayerTiming( const Matrix<unordered_map<int, int>> &timingGrid,
-                                                             int currentPlayer)
-// Algorithm : Precompute the timing grid for the current player
-{
-    Matrix<int> currentTiming(config.W, config.H, maxLookahead + 1);
-
-    for (int x = 0; x < config.W; x++)
-    {
-        for (int y = 0; y < config.H; y++)
-        {
-            unordered_map<int, int>::const_iterator it = timingGrid[x][y].find(currentPlayer);
-            currentTiming[x][y] = (it != end(timingGrid[x][y])) ? it->second : maxLookahead + 1;
-        }
-    }
-    return currentTiming;
-}  // ----- End of precomputeCurrentPlayerTiming
-
-
-pair<Matrix<bool>, Matrix<int>> SpaceRiskAnalyzer::precomputeOccupancy(const Players &playerState)
-// Algorithm : Precompute the occupied cells and heads for all players to avoid recomputing
-// the same data for calculateAreas and calculateRiskHeatmap
-{
-    // Precompute occupied cells and heads
     Matrix<bool> occupied(config.W, config.H, false);
     Matrix<int> heads(config.W, config.H, 0);
 
-    // Fill the matrices with every player's body parts
-    for (const auto &player : playerState)
+    for (int player = 1; player <= config.N; player++)
     {
-        for (const auto &part : player.second.snake)
+        const auto &data = state.players.at(player);
+
+        if (data.snake.empty())
         {
-            occupied[part.x][part.y] = true;
+            throw invalid_argument("Cannot analyze an empty snake");
         }
 
-        Coord head = player.second.snake.front();
-        heads[head.x][head.y] = player.first;
+        // Dead bodies and tails remain obstacles; future tail release is not predicted here.
+        for (const Coord &cell : data.snake)
+        {
+            if (!isInbound(cell, config))
+            {
+                throw invalid_argument("Snake segment outside the board");
+            }
+
+            occupied[cell.y][cell.x] = true;
+        }
+
+        if (data.playerInfo.alive)
+        {
+            Coord head = data.snake.front();
+            heads[head.y][head.x] = player;
+        }
     }
 
     return {occupied, heads};
-}  // ----- End of precomputeOccupancy
+}  //----- end of precomputeOccupancy
+
+
+ReachTiming SpaceRiskAnalyzer::computeReachTiming(const GameState &state, const Matrix<bool> &occupied, int limit) const
+// Algorithm : Run an independent breadth-first search per living head and translate path lengths into scheduled arrivals.
+{
+    const auto &config = state.config;
+    ReachTiming timing{Matrix<unordered_map<int, long long>>(config.W, config.H), config.N};
+
+    for (int player = 1; player <= config.N; player++)
+    {
+        const auto &data = state.players.at(player);
+
+        if (!data.playerInfo.alive)
+        {
+            continue;
+        }
+
+        // Each player needs its own visited distances so shared cells retain all arrivals.
+        // Paths may cross contested free cells; this estimates territory, not guaranteed control.
+        Matrix<int> steps(config.W, config.H, -1);
+        queue<Coord> pending;
+        Coord head = data.snake.front();
+        steps[head.y][head.x] = 0;
+        timing.slots[head.y][head.x][player] = 0;
+        pending.push(head);
+        int offset = (player - state.currentPlayer + config.N) % config.N;
+
+        while (!pending.empty())
+        {
+            Coord cell = pending.front();
+            pending.pop();
+            int distance = steps[cell.y][cell.x];
+
+            if (limit >= 0 && distance >= limit)
+            {
+                continue;
+            }
+
+            for (const Coord &direction : DIRECTIONS)
+            {
+                Coord next{cell.x + direction.x, cell.y + direction.y};
+
+                if (!isInbound(next, config) || occupied[next.y][next.x] || steps[next.y][next.x] >= 0)
+                {
+                    continue;
+                }
+
+                steps[next.y][next.x] = distance + 1;
+                // The next player's first move finishes at slot 1; dead slots still occupy time.
+                timing.slots[next.y][next.x][player] = offset + 1LL + static_cast<long long>(distance) * config.N;
+                pending.push(next);
+            }
+        }
+    }
+
+    return timing;
+}  //----- end of computeReachTiming
+
+
+AreaResult SpaceRiskAnalyzer::calculateAreas(const GameState &state, const Matrix<bool> &occupied,
+                                             const Matrix<int> &heads, const ReachTiming &timing) const
+// Algorithm : Assign nearest-player territory and average the original adjacent-obstacle pressure over owned cells.
+{
+    const auto &config = state.config;
+    AreaResult areas{vector<float>(config.N + 1, 0.f), vector<float>(config.N + 1, 0.f)};
+
+    for (int y = 0; y < config.H; y++)
+    {
+        for (int x = 0; x < config.W; x++)
+        {
+            int owner = 0;
+            long long shortest = numeric_limits<long long>::max();
+
+            for (const auto &[player, arrival] : timing.slots[y][x])
+            {
+                // Territory uses move distance, deliberately discarding scheduled turn priority.
+                long long distance = (arrival + config.N - 1) / config.N;
+
+                if (distance < shortest)
+                {
+                    shortest = distance;
+                    owner = player;
+                }
+                else if (distance == shortest)
+                {
+                    owner = 0;
+                }
+            }
+
+            // Unreachable cells and equal-distance contested cells contribute to neither player.
+            if (owner == 0)
+            {
+                continue;
+            }
+
+            areas.space[owner]++;
+            float pressure = 0.f;
+            int directions = 0;
+
+            for (const Coord &direction : DIRECTIONS)
+            {
+                Coord next{x + direction.x, y + direction.y};
+
+                if (!isInbound(next, config))
+                {
+                    continue;
+                }
+
+                directions++;
+
+                if (occupied[next.y][next.x])
+                {
+                    pressure += 1.f;
+                    int head = heads[next.y][next.x];
+
+                    // Retain the existing additional pressure from own and opponent living heads.
+                    if (head != 0)
+                    {
+                        pressure += head == owner ? 0.5f : 2.f;
+                    }
+                }
+            }
+
+            if (directions > 0)
+            {
+                areas.blockRisk[owner] += pressure / directions;
+            }
+        }
+    }
+
+    // These are heuristic pressure values, not probabilities; head weights can exceed one.
+    for (int player = 1; player <= config.N; player++)
+    {
+        if (areas.space[player] > 0.f)
+        {
+            areas.blockRisk[player] /= areas.space[player];
+        }
+    }
+
+    return areas;
+}  //----- end of calculateAreas
 
 
 void SpaceRiskAnalyzer::precomputeDecay()
-// Algorithm : Precompute the decay table for the exponential decay of the risk heatmap
-// to avoid recomputing it at each step
+// Algorithm : Precompute exponential risk decay once for each allowed move distance.
 {
-    decayTable.resize(maxLookahead + 1);
+    decayTable.resize(static_cast<size_t>(maxLookahead) + 1);
 
-    for (int i = 0; i <= maxLookahead; i++)
+    for (int distance = 0; distance <= maxLookahead; distance++)
     {
-        decayTable[i] = pow(decayFactor, i);
+        decayTable[distance] = pow(decayFactor, distance);
     }
-}  // ----- End of precomputeDecay
+}  //----- end of precomputeDecay
