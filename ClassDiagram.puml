@@ -193,10 +193,23 @@ package "DQNPackage" {
         + size() : int
     }
 
+    note bottom of ReplayBuffer
+        At capacity, evict the oldest transition (FIFO).
+        Sample uniformly without replacement using the seeded generator,
+        up to the smaller of batch size and stored transition count.
+    end note
+
     class Reward {
         - rewards : NNRewards
         + computeReward(previous : GameState, next : GameState, player : int) : float
     }
+
+    note bottom of Reward
+        Award the setup bonus when a surviving opponent goes from
+        more than two legal moves to two or fewer across the interval.
+        Credit observed alive-to-dead transitions once; predicted deaths earn no bonus.
+        Award a sole-survivor win once without duplicating the final elimination reward.
+    end note
 
     class ModelPersistence {
         + saveDQN(dqn : DQN, filename : string, trainingStep : int) : void

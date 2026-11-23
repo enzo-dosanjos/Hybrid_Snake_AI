@@ -45,9 +45,6 @@ class StateAnalyzer {
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        float computeKillZoneProximity(Coord head, const GameConfig &config) const;
-        // Contract : Combine proximity to outer-quarter edges and the nearest wall, symmetrically
-
         static std::array<float, 3> distanceMetrics(Coord head, const std::deque<Coord> &body, float maxDistance);
         // Contract : Return normalized minimum, maximum and mean distances for a nonempty body and positive maxDistance
 };

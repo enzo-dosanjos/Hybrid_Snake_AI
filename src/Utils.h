@@ -14,6 +14,7 @@ Utils - Utility functions for game rules and coordinates
 //------------------------------------------------------------------------
 
 //--------------------------------------------------------- System Include
+#include <algorithm>
 #include <stdexcept>
 
 //-------------------------------------------------------- Used interfaces
@@ -76,5 +77,32 @@ inline bool isInbound(Coord coord, const GameConfig &config)
 {
     return coord.x >= 0 && coord.x < config.W && coord.y >= 0 && coord.y < config.H;
 }  //----- end of isInbound
+
+
+inline float computeKillZoneProximity(Coord head, const GameConfig &config)
+// Algorithm : Average symmetric outer-quarter edge weights with normalized nearest-wall proximity
+{
+    validateGameConfig(config);
+    // Distances to the nearest wall on each axis make opposite edges equivalent
+    float horizontal = std::min(head.x, config.W - 1 - head.x);
+    float vertical = std::min(head.y, config.H - 1 - head.y);
+    float cornerWeight = 0.f;
+
+    // Each axis contributes half a point in its outer quarter, emphasizing corners
+    if (horizontal < config.W / 4.f)
+    {
+        cornerWeight += 0.5f;
+    }
+
+    if (vertical < config.H / 4.f)
+    {
+        cornerWeight += 0.5f;
+    }
+
+    // Combine the corner indicator with continuous wall proximity using the longer side
+    // This geometric heuristic does not establish that an opponent is actually trapped
+    float wall = 1.f - std::min(horizontal, vertical) / (std::max(config.W, config.H) / 2.f);
+    return std::clamp((cornerWeight + wall) / 2.f, 0.f, 1.f);
+}  //----- end of computeKillZoneProximity
 
 #endif //UTILS_H

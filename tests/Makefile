@@ -31,6 +31,7 @@ build/tests/minimax: tests/MinimaxTests.cpp $(TEST_ENGINE) src/Agent/MinimaxAgen
 build/tests/cnn: tests/CNNTests.cpp src/DQN/CNN.cpp
 build/tests/fcnn: tests/FCNNTests.cpp src/DQN/FCNN.cpp
 build/tests/replay-buffer: tests/ReplayBufferTests.cpp src/DQN/ReplayBuffer.cpp
+build/tests/reward: tests/RewardTests.cpp $(TEST_ENGINE) src/DQN/Reward.cpp
 build/tests/dqn: tests/DQNTests.cpp $(TEST_DQN)
 build/tests/persistence: tests/PersistenceTests.cpp $(TEST_DQN) src/DQN/ModelPersistence.cpp
 

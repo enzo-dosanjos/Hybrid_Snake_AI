@@ -250,33 +250,6 @@ int StateAnalyzer::getFeatureCount(int numPlayers, const FeatureSelection &selec
 
 
 //---------------------------------------------------------------- PRIVATE
-float StateAnalyzer::computeKillZoneProximity(Coord head, const GameConfig &config) const
-// Algorithm : Average symmetric outer-quarter edge weights with normalized nearest-wall proximity
-{
-    validateGameConfig(config);
-    // Distances to the nearest wall on each axis make opposite edges equivalent
-    float horizontal = min(head.x, config.W - 1 - head.x);
-    float vertical = min(head.y, config.H - 1 - head.y);
-    float cornerWeight = 0.f;
-
-    // Each axis contributes half a point in its outer quarter, emphasizing corners
-    if (horizontal < config.W / 4.f)
-    {
-        cornerWeight += 0.5f;
-    }
-
-    if (vertical < config.H / 4.f)
-    {
-        cornerWeight += 0.5f;
-    }
-
-    // Combine the corner indicator with continuous wall proximity using the longer side
-    // This geometric heuristic does not establish that an opponent is actually trapped
-    float wall = 1.f - min(horizontal, vertical) / (max(config.W, config.H) / 2.f);
-    return clamp((cornerWeight + wall) / 2.f, 0.f, 1.f);
-}  //----- end of computeKillZoneProximity
-
-
 array<float, 3> StateAnalyzer::distanceMetrics(Coord head, const deque<Coord> &body, float maxDistance)
 // Algorithm : Accumulate normalized Euclidean min, max and mean distances from a head to all segments
 {

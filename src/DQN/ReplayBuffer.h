@@ -1,172 +1,67 @@
 /*************************************************************************
-ReplayBuffer - A replay buffer for the Deep Q-Learning algorithm
+ReplayBuffer - Stores and samples Deep Q-Learning transitions
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
 
-//---- Interface of the module <ReplayBuffer> (file ReplayBuffer.h) ----
+//--------- Interface of the module <ReplayBuffer> (file ReplayBuffer.h) ---------
 #ifndef REPLAY_BUFFER_H
 #define REPLAY_BUFFER_H
 
 //------------------------------------------------------------------------
 // Role of the <ReplayBuffer> module
-// The ReplayBuffer module implements z replay buffer for the Deep
-// Q-Learning algorithm. The replay buffer stores the transitions of the
-// agent and allows to sample a batch of transitions for the training.
+// Owns a bounded history of transitions and a seeded batch sampler.
 //------------------------------------------------------------------------
 
-//-------------------------------------------------------- Used interfaces
-#include "Structs.h"
-
-//---------------------------------------------------------------- INCLUDE
+//--------------------------------------------------------- System Include
+#include <deque>
 #include <random>
-#include <sstream>
+#include <vector>
 
-
-//------------------------------------------------------------------ Types
-
+//-------------------------------------------------------- Used interfaces
+#include "../Structs.h"
 
 //----------------------------------------------------------------- PUBLIC
-class ReplayBuffer
-{
+class ReplayBuffer {
 //--------------------------------------------------------- Public Methods
     public:
-        void push(
-            const Transition &transition
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        void push(const Transition &transition);
+        // Contract : Copy the transition and evict the oldest entry when full.
 
-        Transition createTransition(
-            const std::vector<float> &prevBoardState,
-            const std::vector<float> &boardState,
-            const std::vector<float> &prevExtraState,
-            const std::vector<float> &extraState,
-            const std::string &action,
-            float reward,
-            bool done
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        std::vector<Transition> createBatch(
-            int batchSize
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        std::vector<Transition> createBatch(int batchSize);
+        // Contract : Sample uniformly without replacement, up to the number stored.
+        // A nonpositive request returns an empty batch.
 
 //--------------------------------------------------------- SETTERS/GETTERS
-        std::deque<Transition> getTransitions()
+        std::deque<Transition> getTransitions() const
+        // Algorithm : Return an independent copy in insertion order.
         {
             return buffer;
-        }
-        // Usage :
-        //
-        // Contract :
-        //
+        }  //----- end of getTransitions
 
-        int size()
+
+        int size() const
+        // Algorithm : Return the number of stored transitions.
         {
-            return buffer.size();
-        }
-        // Usage :
-        //
-        // Contract :
-        //
+            return static_cast<int>(buffer.size());
+        }  //----- end of size
+
 
         void clearReplayBuffer()
-            {
-                buffer.clear();
-            }
-        // Usage :
-        //
-        // Contract :
-        //
+        // Algorithm : Erase all stored experiences while retaining the sampling generator.
+        {
+            buffer.clear();
+        }  //----- end of clearReplayBuffer
 
 //---------------------------------------------- Constructors - destructor
-        explicit ReplayBuffer(
-            int p_capacity,
-            const std::mt19937 &p_gen
-        ) : capacity (p_capacity),
-            gen(p_gen)  // Initialize with a random seed
-        // Usage :
-        //
-        // Contract :
-        //
-        {
-            #ifdef MAP
-                    cout << "Calling the constructor of ReplayBuffer" << endl;
-            #endif
-        }
-
-        ~ReplayBuffer ()
-        // Usage :
-        //
-        // Contract :
-        //
-        {
-            #ifdef MAP
-                    cout << "Calling the destructor of ReplayBuffer" << endl;
-            #endif
-        }
-
-
-    protected:
-        std::vector<Transition> sample(
-            int start,
-            int end,
-            int batchSize
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-
-        void mergeSamples(
-            std::vector<Transition>& top,
-            std::vector<Transition>& rest,
-            std::vector<Transition>& output
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void entropyInjection(
-            std::vector<Transition>& batch,
-            float entropyWeight
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void removeLowPriority(
-            int numToRemove,
-            float priorityThreshold = 0.2
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
+        ReplayBuffer(int p_capacity, const std::mt19937 &p_gen);
+        // Contract : Require a positive capacity and copy the sampling generator.
 
 //---------------------------------------------------------------- PRIVATE
     private:
         std::deque<Transition> buffer;
-        int capacity;  // should be in [100000, 1000000] to keep only transitions that can be useful
-
-        // random number generator for sampling
+        int capacity;
         std::mt19937 gen;
 };
-
-
 
 #endif //REPLAY_BUFFER_H
