@@ -1,5 +1,5 @@
 /*************************************************************************
-DQN - Full DQN implementation for the game of Snake
+DQN - Evaluates actions and learns from replayed Snake decisions
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -10,299 +10,66 @@ DQN - Full DQN implementation for the game of Snake
 
 //------------------------------------------------------------------------
 // Role of the <DQN> module
-// This module is a class that implements a full Deep Q-Network (DQN) with
-// a Convolutional Neural Network (CNN) and a Fully Connected Neural Network
-// (FCNN) to play the game of Snake. It includes methods to train the
-// network, select actions, save and load the model, and save and load the
-// replay buffer.
+// Combines pooled convolutional features with analytical inputs and trains
+// an online action-value network against a separate target network.
 //------------------------------------------------------------------------
 
+//--------------------------------------------------------- System Include
+#include <array>
+#include <optional>
+#include <random>
+#include <vector>
+
 //-------------------------------------------------------- Used interfaces
-#include "Structs.h"
-#include "ReplayBuffer.h"
+#include "../Structs.h"
 #include "CNN.h"
 #include "FCNN.h"
-
-//------------------------------------------------------------------ Types
-struct ValidationResult {
-    bool victory;
-    int survivalTurns;
-    float avgReward;
-    float maxReward;
-    float minReward;
-    float actionEntropy;
-    std::map<std::string, int> actionCounts;
-    float qValueConsistency;
-    float deathPenalty;
-};
+#include "ReplayBuffer.h"
 
 //----------------------------------------------------------------- PUBLIC
-class DQN
-{
+class DQN {
 //--------------------------------------------------------- Public Methods
     public:
+        std::optional<Action> selectAction(const EncodedState &state, bool explore);
+        // Contract : Return no action for an empty mask, otherwise an epsilon-greedy legal action.
 
+        std::array<float, 4> forwardPropagation(const EncodedState &state);
+        // Contract : Return the four raw online Q-values in Action order.
 
-        std::string selectAction(
-            const std::vector<float> &boardState,
-            const std::vector<float> &extraState
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        void remember(const Transition &transition);
+        // Contract : Store an owned copy of the executed decision and its outcome.
 
-        void copyWeights (
-            const DQN &src
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        void train(int batchSize, float learningRate);
+        // Contract : Apply the mean gradient of a sampled batch and decay epsilon.
+        // An empty batch leaves both the parameters and epsilon unchanged.
 
-        std::vector<float> forwardPropagation(
-            const std::vector<float> &boardState,
-            const std::vector<float> &extraState
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        std::vector<float> computeError (
-            const std::vector<float> &targetOutput,
-            Transition &transition
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void spreadError(
-            const std::vector<float> &fcnnError
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void train (
-            std::vector<Transition> &batch,
-            float learningRate
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        ValidationResult analyzeResults(
-            const std::string &filename
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        float calculateScore(
-            const ValidationResult& result
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void validate(
-            const std::vector<GameConfig> &validationSet
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void saveToFile(
-            const std::string &filename,
-            int trainingStep
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void loadFromFile(
-            const std::string &filename,
-            int &trainingStep
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void saveModelToFile(
-            const std::string &filename
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void loadModelFromFile(
-            const std::string &filename
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void saveReplayBufferToFile(
-            const std::string &filename,
-            int trainingStep
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void loadReplayBufferFromFile(
-            const std::string &filename,
-            int &trainingStep
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        void updateTargetNetworks();
+        // Contract : Refresh both target networks with the current online parameters.
 
 //---------------------------------------------- Constructors - destructor
-        DQN(
-              const GameConfig &config,
-              int boardChannels,
-              int replayBufferSize = 100000,
-              float p_epsilon = 1.0,
-              float p_minEpsilon = 0.01,
-              float p_epsilonDecay = 0.995,
-              const std::mt19937 &p_gen
-          ) : cnn(config.W * config.H * boardChannels, p_gen),
-              fcnn(-1, p_gen),  // the input size depends on the CNN output
-              replayBuffer(replayBufferSize),
-              epsilon(p_epsilon),
-              minEpsilon(p_minEpsilon),
-              epsilonDecay(p_epsilonDecay),
-              gen(p_gen)
-        {
-            #ifdef MAP
-                cout << "Calling the constructor of NNAI" << endl;
-            #endif
-        }
-
-
-//-------------------------------------------------------------- PROTECTED
-    protected:
-        std::vector<float> combineFeatures(
-            const std::vector<float> &boardState,
-            const std::vector<float> &extras
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void decayEpsilon();
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void saveLayer(
-            std::ofstream &file,
-            const FullyConnectedLayer &layer
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void saveConvLayer(
-            std::ofstream &file,
-            const ConvolutionalLayer &layer
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void saveVector(
-            std::ofstream &file,
-            const std::vector<float> &vec
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void saveString(
-            std::ofstream &file,
-            const std::string &str
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void loadLayers(
-            std::ifstream &file
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void loadConvLayers(
-            std::ifstream &file
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void loadVector(
-            std::ifstream &file,
-            std::vector<float> &vec
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void loadString(
-            std::ifstream &file,
-            std::string &str
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
+        DQN(const ModelConfig &config, const std::mt19937 &p_gen);
+        // Contract : Build matching online and target networks for the configured input and layer shapes.
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        // Neural Networks
+        static CNN makeCNN(const ModelConfig &config, const std::mt19937 &gen);
+        static FCNN makeFCNN(const ModelConfig &config, const std::mt19937 &gen);
+        static std::array<float, 4> evaluate(FCNN &network, const FeatureTensor &cnnOutput,
+                                            const std::vector<float> &extras);
+        static int bestLegalIndex(const std::array<float, 4> &values, const ActionMask &legalActions);
+        float bellmanTarget(const Transition &transition);
+        void decayEpsilon();
+
         CNN cnn;
         FCNN fcnn;
-
-        // Target Networks
-        CNN targetCnn;
-        FCNN targetFcnn;
-
+        CNN targetCNN;
+        FCNN targetFCNN;
         ReplayBuffer replayBuffer;
-
-    private:
-        float epsilon;         // Initial exploration rate
-        float minEpsilon;      // Minimum value of epsilon
-        float epsilonDecay;    // Decay factor for epsilon
-        float gamma;           // Discount factor for future rewards
-
+        float epsilon;
+        float minEpsilon;
+        float epsilonDecay;
+        float gamma;
         std::mt19937 gen;
 };
-
-
 
 #endif //DQN_H

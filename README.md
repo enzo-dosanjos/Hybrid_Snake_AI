@@ -13,8 +13,9 @@ legal moves by exploring copies of the live game state, using territory and risk
 estimates at the search horizon. The executable requires no model weights or
 external C++ libraries and speaks the [INSAlgo Snake Competition protocol](https://github.com/INSAlgo/Concours-Snake).
 
-The refactor has reached checkpoint 2. DQN, hybrid play, training, and parameter
-optimization are later stages of the target architecture.
+The refactor has reached checkpoint 2 and completed standalone DQN integration.
+Neural and hybrid agents, model persistence, training, and parameter optimization
+are later stages of the target architecture.
 
 ---
 
@@ -263,9 +264,9 @@ A classical AI approach designed for strategic defense.
 
 ### Neural Network AI
 Deep reinforcement learning approach:
-- **CNN**: Processes the board state visually : 3x3 conv → maxpool → 3x3 conv
-- **Feature Fusion**: Concatenates spatial + analytic features
-- **FCNN**: Makes decisions based on extracted features and the output of the CNN : 64 → 32 → 4 FC layers with ReLU except the last one which is a linear layer
+- **CNN** uses two padded 3×3 ReLU convolutions by default, with 16 and 32 output channels. Global average pooling gives one value per final channel.
+- **Feature fusion** appends the selected analytical features to those channel means in their encoded order.
+- **FCNN** defaults to ReLU layers of width 64 and 32, followed by four linear outputs in left, up, right, down order. Set `ModelConfig::convolutionLayers` and `ModelConfig::denseHiddenSizes` to change the layer shapes.
 - **ReplayBuffer**: Implements experience replay for stable learning
 - Training mechanisms with decay exploration rates
 
@@ -297,7 +298,7 @@ recorded protocol input, including a position with a unique winning move.
 
 
 ## todo:
-- Connect the hybrid agent after DQN integration.
+- Connect the neural and hybrid agents to DQN.
 - finish optimise.cpp
 - finish train.cpp
 

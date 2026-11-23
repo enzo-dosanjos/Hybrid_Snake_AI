@@ -1,5 +1,5 @@
 /*************************************************************************
-DQN - todo
+DQN - Evaluates actions and learns from replayed Snake decisions
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -8,775 +8,228 @@ DQN - todo
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
-#include <iostream>
 #include <algorithm>
-#include <fstream>
-#include <iterator>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
-#include "../include/DQN.h"
+#include "DQN.h"
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-void DQN::copyWeights (const DQN &src) {
-    // copy weights and biases of the FCNN and the CNN
-    fcnn.copyWeights(src.fcnn);
-    targetFcnn.copyWeights(src.targetFcnn);
-
-    cnn.copyWeights(src.cnn);
-    targetCnn.copyWeights(src.targetCnn);
-}
-
-
-string DQN::selectAction(const vector<float> &boardState, const vector<float> &extraState)
-// Algorithm : Selects an action using epsilon-greedy policy
+DQN::DQN(const ModelConfig &config, const mt19937 &p_gen)
+    : cnn(makeCNN(config, p_gen)), fcnn(makeFCNN(config, p_gen)),
+      targetCNN(cnn), targetFCNN(fcnn), replayBuffer(config.replayCapacity, p_gen),
+      epsilon(config.epsilon), minEpsilon(config.minEpsilon), epsilonDecay(config.epsilonDecay),
+      gamma(config.gamma), gen(p_gen)
+// Algorithm : Configure the online networks and copy their initial parameters into the targets.
 {
-    // Random number generator
-    uniform_real_distribution<float> dist(0.0, 1.0);
-
-    if (dist(gen) < epsilon)
+    for (float value : {epsilon, minEpsilon, epsilonDecay, gamma})
     {
-        // Exploration: choose a random action
-        uniform_int_distribution<int> actionDist(0, ACTIONS.size() - 1);
-        int randInd = actionDist(gen);
-        return ACTIONS[randInd];
-    }
-    else
-    {
-        // Exploitation: choose the action with the highest Q-value
-        vector<float> qValues = forwardPropagation(boardState, extraState); // Compute Q-values
-        auto itBestVal = max_element(qValues.begin(), qValues.end());
-        int bestInd = distance(qValues.begin(), itBestVal);  // Use distance to get the index of the max element
-
-        return ACTIONS[bestInd];
-    }
-}  //----- End of selectAction
-
-
-vector<float> DQN::forwardPropagation(const vector<float> &boardState, const vector<float> &extraState)
-// Algorithm : Forward propagation through the neural network (CNN + FCNN)
-{
-    // Reshape the board state to match the CNN input format
-    Matrix<vector<float>> reshapedBoardState = helper.reshapeBoardState(boardState);
-
-    // Forward pass through CNN
-    Matrix<vector<float>> cnnOutput = aiCNN.forwardPropagation(reshapedBoardState);
-
-    // Global average pooling to get a flat vector
-    vector<float> pooled = aiCNN.globalAvgPooling(cnnOutput);
-
-    // Combine with extra features
-    vector<float> combined = combineFeatures(pooled, extraState);
-
-    // Forward propagation through FCNN
-    return aiFCNN.forwardPropagation(combined);
-}  //----- End of forwardPropagation
-
-
-vector<float> DQN::computeError (const vector<float> &targetOutput, Transition &transition)  // todo: implement n-step q-learning
-// Algorithm : Compute the error of the output layer based on the target Q-value,
-// the highest value of the target output and the Bellman equation
-{
-    vector<float> error;
-
-    // If the current episodes has ended, there's no futur so 0
-    float maxQ = transition.done ? 0.0 : *max_element(targetOutput.begin(), targetOutput.end());
-
-    // Bellman equation : Compute the target Q-value for the action
-    float targetQ = transition.reward + gamma * maxQ;  // gamma controls the importance of future rewards
-
-    // Compute the loss for the taken action, the other are set to 0
-    for (int i = 0; i < fcnn.back().outputSize; i++)
-    {
-        if (ACTIONS[i] == transition.action)
+        if (!(value >= 0.f && value <= 1.f))
         {
-            float actionError = fcnn.back().output[i] - targetQ;
-            error[i] = actionError;
-            transition.tdError = actionError;
-        }
-        else
-        {
-            error[i] = 0.0;
+            throw invalid_argument("DQN exploration and discount parameters must be in [0, 1]");
         }
     }
-
-    return error;
-}
+}  //----- end of DQN
 
 
-void DQN::spreadError(const vector<float> &fcnnError)  // todo: check and rename
-// Algorithm : Spread the FCNN error across the last layer's feature maps
+optional<Action> DQN::selectAction(const EncodedState &state, bool explore)
+// Algorithm : Sample uniformly from legal actions with probability epsilon, otherwise maximize the legal Q-values.
 {
-    // Distribute the error from the FCNN into the final CNN layer
-    ConvolutionalLayer &lastLayer = nn.back();
-    int outChannels = lastLayer.outputChannels;
-    int outH = lastLayer.outputSize.first;
-    int outW = lastLayer.outputSize.second;
-
-    // Spread the FCNN error across the last layer's feature maps
-    for(int c = 0; c < outChannels; c++)
+    if (state.legalActions.none())
     {
-        float perElementError = fcnnError[c] / float(outH * outW);
-        for(int y = 0; y < outH; y++)
+        return nullopt;
+    }
+
+    if (explore && uniform_real_distribution<float>(0.f, 1.f)(gen) < epsilon)
+    {
+        array<Action, 4> legalActions;
+        int count = 0;
+
+        for (size_t index = 0; index < state.legalActions.size(); index++)
         {
-            for(int x = 0; x < outW; x++)
+            if (state.legalActions[index])
             {
-                lastLayer.error[c][y][x] = perElementError;
+                legalActions[count] = static_cast<Action>(index);
+                count++;
             }
         }
+
+        return legalActions[uniform_int_distribution<int>(0, count - 1)(gen)];
     }
-} //----- end of spreadFCNNError
 
-void DQN::train (vector<Transition> &batch, float learningRate) {
-    // Reset gradients for both networks
-    aiCNN.resetGradients();
-    aiFCNN.resetGradients();
+    return static_cast<Action>(bestLegalIndex(forwardPropagation(state), state.legalActions));
+}  //----- end of selectAction
 
-    for (auto &transition : batch)
+
+array<float, 4> DQN::forwardPropagation(const EncodedState &state)
+// Algorithm : Encode the board with the online CNN and evaluate it together with the selected extras.
+{
+    return evaluate(fcnn, cnn.forwardPropagation(state.board), state.extraFeatures);
+}  //----- end of forwardPropagation
+
+
+void DQN::remember(const Transition &transition)
+// Algorithm : Check the executed action index before copying the decision into replay.
+{
+    int action = static_cast<int>(transition.action);
+    if (action < 0 || action >= static_cast<int>(ACTIONS.size()))
     {
-        // Forward propagation on the current state
-        vector<float> qValues = forwardPropagation(transition.boardState, transition.extraState);
-
-        // Forward propagation on the next state with the target network
-        vector<float> targetQValues =
-            targetNetwork.forwardPropagation(transition.nextBoardState, transition.nextExtraState);
-
-        // Compute the error for FCNN
-        vector<float> error = computeError(targetQValues, transition);
-
-        // Backpropagation through FCNN
-        aiFCNN.backPropagation(error);
-
-        // Spread error to CNN
-        aiCNN.spreadFCNNError(aiFCNN.getError(0));
-
-        // Backpropagation through CNN
-        aiCNN.backPropagation();
-
-        // Accumulate gradients
-        aiFCNN.accumulateGradient();
-        aiCNN.accumulateGradient();
+        throw invalid_argument("Invalid replay action");
     }
 
-    // Update weights
-    aiFCNN.updateWeights(learningRate);
-    aiCNN.updateWeights(learningRate);
+    replayBuffer.push(transition);
+}  //----- end of remember
 
-    // Decay exploration rate
+
+void DQN::train(int batchSize, float learningRate)
+// Algorithm : Accumulate online gradients for decision-to-decision Bellman targets and apply their mean.
+{
+    if (!isfinite(learningRate) || learningRate < 0.f)
+    {
+        throw invalid_argument("DQN learning rate must be finite and nonnegative");
+    }
+
+    auto batch = replayBuffer.createBatch(batchSize);
+    if (batch.empty())
+    {
+        return;
+    }
+
+    cnn.resetGradients();
+    fcnn.resetGradients();
+
+    for (const Transition &transition : batch)
+    {
+        float target = bellmanTarget(transition);
+        auto cnnOutput = cnn.forwardPropagation(transition.state.board);
+        auto values = evaluate(fcnn, cnnOutput, transition.state.extraFeatures);
+        int action = static_cast<int>(transition.action);
+
+        // The derivative of half-squared TD error is zero for the other action outputs.
+        vector<float> outputGradient(values.size(), 0.f);
+        outputGradient[action] = values[action] - target;
+        auto inputGradient = fcnn.backPropagation(outputGradient);
+
+        // Only the prefix of the dense input came from the CNN.
+        inputGradient.resize(cnnOutput.size());
+        cnn.backPropagation(CNN::globalAvgPoolingBackward(inputGradient, cnnOutput));
+
+        fcnn.accumulateGradients();
+        cnn.accumulateGradients();
+    }
+
+    float stepSize = learningRate / batch.size();
+    fcnn.updateWeights(stepSize);
+    cnn.updateWeights(stepSize);
     decayEpsilon();
-} //----- end of trainNN
+}  //----- end of train
 
 
-ValidationResult DQN::analyzeResults(const string &filename)
-// Algorithm : Analyze the results of a game and return a ValidationResult
-// with extracted metrics from the game log file
+void DQN::updateTargetNetworks()
+// Algorithm : Copy the latest online weights and biases without changing the online training state.
 {
-    ifstream file(filename);
-    if(!file) {
-        cerr << "Error opening file for reading: " << filename << endl;
-        return {};
+    targetCNN.copyWeights(cnn);
+    targetFCNN.copyWeights(fcnn);
+}  //----- end of updateTargetNetworks
+
+
+//---------------------------------------------------------------- PRIVATE
+CNN DQN::makeCNN(const ModelConfig &config, const mt19937 &gen)
+// Algorithm : Derive the input channels from the observation schema and add the configured convolution layers.
+{
+    if (config.observationSchemaVersion != OBSERVATION_SCHEMA_VERSION ||
+        config.numPlayers <= 0 ||
+        config.numPlayers > (numeric_limits<int>::max() - 1) / static_cast<int>(CHANNELS_PER_PLAYER) ||
+        config.convolutionLayers.empty())
+    {
+        throw invalid_argument("Invalid DQN observation or convolution configuration");
     }
 
-    ValidationResult result;
-    result.victory = false;
-    result.survivalTurns = 0;
-    result.avgReward = 0.0;
-    result.maxReward = -numeric_limits<float>::max();
-    result.minReward = numeric_limits<float>::max();
-    result.actionEntropy = 0.0;
-    result.qValueConsistency = 0.0;
-    result.deathPenalty = 0.0;
-
-    map<string, int> action_counts = {{"left", 0}, {"right", 0}, {"up", 0}, {"down", 0}};
-    int total_actions = 0;
-    vector<float> rewards;
-    vector<float> q_values;
-    string line;
-
-    while(getline(file, line))
+    CNN network(CHANNELS_PER_PLAYER * config.numPlayers + 1, gen);
+    for (const auto &layer : config.convolutionLayers)
     {
-        // Detect win
-        if(line.find("is eliminated") != string::npos)
+        network.addLayer(layer);
+    }
+
+    return network;
+}  //----- end of makeCNN
+
+
+FCNN DQN::makeFCNN(const ModelConfig &config, const mt19937 &gen)
+// Algorithm : Size the dense input from pooled channels and selected extras, then add a linear action head.
+{
+    int pooledChannels = config.convolutionLayers.back().outputChannels;
+    if (config.featureSchemaVersion != EXTRA_FEATURE_SCHEMA_VERSION ||
+        config.extraFeatureCount < 0 || config.extraFeatureCount > numeric_limits<int>::max() - pooledChannels)
+    {
+        throw invalid_argument("Invalid DQN extra-feature configuration");
+    }
+
+    FCNN network(pooledChannels + config.extraFeatureCount, gen);
+    for (int hiddenSize : config.denseHiddenSizes)
+    {
+        network.addLayer("ReLU", hiddenSize);
+    }
+
+    network.addLayer("linear", ACTIONS.size());
+    return network;
+}  //----- end of makeFCNN
+
+
+array<float, 4> DQN::evaluate(FCNN &network, const FeatureTensor &cnnOutput,
+                             const vector<float> &extras)
+// Algorithm : Concatenate the spatial channel means followed by extras in their encoded order.
+{
+    auto input = CNN::globalAvgPooling(cnnOutput);
+    input.insert(input.end(), extras.begin(), extras.end());
+    auto output = network.forwardPropagation(input);
+
+    array<float, 4> values;
+    copy(output.begin(), output.end(), values.begin());
+    return values;
+}  //----- end of evaluate
+
+
+int DQN::bestLegalIndex(const array<float, 4> &values, const ActionMask &legalActions)
+// Algorithm : Find the greatest legal action value, breaking ties by Action order.
+{
+    int best = -1;
+    for (size_t index = 0; index < values.size(); index++)
+    {
+        if (legalActions[index] && (best < 0 || values[index] > values[best]))
         {
-            result.victory = (line.find("botOpp") != string::npos);
-        }
-
-        // Count survival turns
-        if(line.find("**Turn ") != string::npos)
-        {
-            result.survivalTurns++;
-        }
-
-        // Analyse rewards
-        if(line.find("> reward: ") != string::npos)
-        {
-            size_t pos = line.find("> reward: ");
-            if(pos != string::npos && pos + 10 < line.size())
-            {
-                try
-                {
-                    float reward = stof(line.substr(pos + 10));
-                    rewards.push_back(reward);
-                    result.maxReward = max(result.maxReward, reward);
-                    result.minReward = min(result.minReward, reward);
-                }
-                catch(const exception& e)
-                {
-                    cerr << "Error parsing reward in line: " << line << endl;
-                    cerr << "Exception: " << e.what() << endl;
-                }
-            }
-        }
-
-        // Analyse Q-values
-        if(line.find("DQN Q-Value: ") != string::npos)
-        {
-            size_t pos = line.find("DQN Q-Value: ");
-            try
-            {
-                float q_val = stof(line.substr(pos + 13));
-                q_values.push_back(q_val);
-            }
-            catch(const exception& e)
-            {
-                cerr << "Error parsing Q-value in line: " << line << endl;
-                cerr << "Exception: " << e.what() << endl;
-            }
-        }
-
-        // Count actions
-        if(line.find("'s move : ") != string::npos && line.find("botDQN") != string::npos)
-        {
-            size_t pos = line.find(": ") + 2;
-            string action = line.substr(pos);
-            action_counts[action]++;
-            total_actions++;
-        }
-
-        // Detect death penalty
-        if(line.find("> done: 1") != string::npos && line.find("reward: "))
-        {
-            size_t pos = line.find("reward: ");
-            try
-            {
-                result.deathPenalty = stof(line.substr(pos + 7));
-            }
-            catch(const exception& e)
-            {
-                cerr << "Error parsing death penalty in line: " << line << endl;
-                cerr << "Exception: " << e.what() << endl;
-            }
+            best = index;
         }
     }
 
-    // Compute average reward during the game
-    if(!rewards.empty())
+    return best;
+}  //----- end of bestLegalIndex
+
+
+float DQN::bellmanTarget(const Transition &transition)
+// Algorithm : Bootstrap one decision ahead from the target network only when a legal next action exists.
+{
+    const auto &next = transition.nextState;
+    if (transition.done || next.legalActions.none())
     {
-        float sum = accumulate(rewards.begin(), rewards.end(), 0.0f);
-        result.avgReward = sum / rewards.size();
+        return transition.reward;
     }
 
-    // Compute action entropy
-    float entropy = 0.0;
-    for(const auto& [action, count] : action_counts)
-    {
-        if(count > 0) {
-            float prob = static_cast<float>(count) / total_actions;
-            entropy -= prob * log2(prob);
-        }
-    }
-    result.actionEntropy = entropy;
+    auto values = evaluate(targetFCNN, targetCNN.forwardPropagation(next.board), next.extraFeatures);
+    return transition.reward + gamma * values[bestLegalIndex(values, next.legalActions)];
+}  //----- end of bellmanTarget
 
-    // Compute Q-value consistency
-    if(!q_values.empty()) {
-        float q_mean = accumulate(q_values.begin(), q_values.end(), 0.0f) / q_values.size();
-        vector<float> diff(q_values.size());
-        transform(q_values.begin(), q_values.end(), diff.begin(), [q_mean](float x) { return pow(x - q_mean, 2); });
-        result.qValueConsistency = sqrt(accumulate(diff.begin(), diff.end(), 0.0f) / q_values.size());
-    }
 
-    result.actionCounts = action_counts;
-
-    return result;
-}  //----- End of analyzeResults
-
-
-
-float DQN::calculateScore(const ValidationResult &result)
-// Algorithm : Calculate a composite score from the validation results
-{
-    const float VICTORY_WEIGHT = 2.0;
-    const float SURVIVAL_WEIGHT = 0.5;
-    const float REWARD_WEIGHT = 1.0;
-    const float ENTROPY_WEIGHT = 0.7;
-    const float CONSISTENCY_WEIGHT = 0.3;
-
-    float score = 0.0;
-
-    // Victory
-    score += result.victory ? VICTORY_WEIGHT : 0.0;
-
-    // Survival turns (normalized)
-    score += (result.survivalTurns / 1000.0) * SURVIVAL_WEIGHT;
-
-    // Average reward (normalized)
-    score += (result.avgReward / 1000.0) * REWARD_WEIGHT;
-
-    // Action entropy (max 2 bits for 4 actions)
-    score += (result.actionEntropy / 2.0) * ENTROPY_WEIGHT;
-
-    // Q-value consistency (inversely proportional)
-    score += (1.0 / (1.0 + result.qValueConsistency)) * CONSISTENCY_WEIGHT;
-
-    return score;
-}  //----- End of calculateScore
-
-
-void DQN::validate(const vector<GameConfig>& validationSet)
-// Algorithm : Validate the agent on a set of configurations and save the scores
-{
-    vector<float> scores;
-
-    for(const auto& config : validationSet) {
-        float total_score = 0.0;
-
-        for(int i = 0; i < 2; ++i) { // 4 games per configuration
-            // Play the game as the first player
-            string log_file = "validation_" + to_string(time(nullptr)) + ".log";
-            string cmd = "python3 snake.py -g " + to_string(config.W) + " " + to_string(config.H)
-                       + " -G " + to_string(config.M) + " botDQN botOpp >> " + log_file + " 2>&1";
-            (void)system(cmd.c_str());
-
-            // Analyse results
-            ValidationResult result = analyzeResults(log_file);
-            cout << "> ------------ Results --------------" << endl;
-            cout << "> Victory: " << boolalpha << result.victory << endl;
-            cout << "> Survived turns: " << result.survivalTurns << endl;
-            cout << "> Average reward: " << result.avgReward << endl;
-            cout << "> Actions' entropy: " << result.actionEntropy << endl;
-            cout << "> Composite score: " << calculateScore(result) << endl << endl;
-
-            total_score += calculateScore(result);
-        }
-
-        for(int i = 0; i < 2; ++i) {
-            // Play the game as the second player
-            string log_file = "validation_" + to_string(time(nullptr)) + ".log";
-            string cmd = "python3 snake.py -g " + to_string(config.W) + " " + to_string(config.H)
-                       + " -G " + to_string(config.M) + " botOpp botDQN >> " + log_file + " 2>&1";
-            (void)system(cmd.c_str());
-
-            // Analyse results
-            ValidationResult result = analyzeResults(log_file);
-            cout << "> ------------ Results --------------" << endl;
-            cout << "> Victory: " << boolalpha << result.victory << endl;
-            cout << "> Survived turns: " << result.survivalTurns << endl;
-            cout << "> Average reward: " << result.avgReward << endl;
-            cout << "> Actions' entropy: " << result.actionEntropy << endl;
-            cout << "> Composite score: " << calculateScore(result) << endl << endl;
-
-            total_score += calculateScore(result);
-        }
-
-        scores.push_back(total_score / 10.0);
-    }
-
-    // Save the scores
-    ofstream("validation_scores.txt", ios::app) << "[" << time(nullptr) << "] ";
-    copy(scores.begin(), scores.end(), ostream_iterator<float>(cout, " "));
-}  //----- End of validate
-
-
-void DQN::saveToFile(const string& filename, int trainingStep)
-// Algorithm : Save the model and replay buffer to files
-{
-    // Save model to one file
-    string modelFile = filename + ".model";
-    saveModelToFile(modelFile);
-
-    // Save replay buffer to a separate file
-    string bufferFile = filename + ".buffer";
-    saveReplayBufferToFile(bufferFile, trainingStep);
-}  //----- End of saveToFile
-
-
-void DQN::loadFromFile(const string& filename, int &trainingStep)
-// Algorithm : Load the model and replay buffer from files
-{
-    // Load model from one file
-    string modelFile = filename + ".model";
-    loadModelFromFile(modelFile);
-
-    // Load replay buffer from a separate file
-    string bufferFile = filename + ".buffer";
-    loadReplayBufferFromFile(bufferFile, trainingStep);
-}  //----- End of loadFromFile
-
-
-void DQN::saveModelToFile(const string& filename)
-// Algorithm : Save the FCNN and CNN architecture and layers
-{
-    ofstream file(filename, ios::binary);
-    if(!file)
-    {
-        cout << "> Cannot open file for writing" << endl;
-    }
-
-    // Save the FCNN architecture
-    int numFCNNLayers = aiFCNN.getNNSize();
-    file.write(reinterpret_cast<char*>(&numFCNNLayers), sizeof(numFCNNLayers));
-
-    for(const auto &layer : aiFCNN.getNN())
-    {
-        // Save the layer's parameters
-        saveLayer(file, layer);
-    }
-
-    // Save the CNN architecture
-    int numCNNLayers = aiCNN.getNNSize();
-    file.write(reinterpret_cast<char*>(&numCNNLayers), sizeof(numCNNLayers));
-
-    // save the weigths and biases of the CNN
-    for(const auto &layer : aiCNN.getNN())
-    {
-        saveConvLayer(file, layer);
-    }
-}  //----- End of saveModelToFile
-
-
-
-void DQN::saveReplayBufferToFile(const string& filename, int trainingStep)
-// Save every transition of the replayBuffer and the training parameters
-{
-    ofstream file(filename, ios::binary);
-    if(!file) {
-        cout << "> Cannot open file for writing: " << filename << endl;
-        return;
-    }
-
-    // Save buffer size
-    int bufferSize = replayBuffer.size();
-    file.write(reinterpret_cast<const char*>(&bufferSize), sizeof(bufferSize));
-
-    // Save each transition
-    for(const auto& transition : replayBuffer.getTransitions()) {
-        // Save reward, done flag and tdError
-        file.write(reinterpret_cast<const char*>(&transition.reward), sizeof(float));
-        file.write(reinterpret_cast<const char*>(&transition.done), sizeof(bool));
-        file.write(reinterpret_cast<const char*>(&transition.tdError), sizeof(float));
-
-        // Save state vectors
-        saveVector(file, transition.boardState);
-        saveVector(file, transition.extraState);
-        saveVector(file, transition.nextBoardState);
-        saveVector(file, transition.nextExtraState);
-
-        // Save action
-        saveString(file, transition.action);
-    }
-
-    // Training parameters
-    file.write(reinterpret_cast<char*>(&trainingStep), sizeof(trainingStep));
-    file.write(reinterpret_cast<char*>(&epsilon), sizeof(epsilon));
-
-    file.close();
-}  //----- End of saveReplayBufferToFile
-
-
-
-void DQN::loadModelFromFile(const string& filename)
-// Algorithm : Load the FCNN and CNN architecture and layers
-{
-    ifstream file(filename, ios::binary);
-    if(!file)
-    {
-        cout << "> Cannot open file for reading" << endl;
-        return;
-    }
-
-    // Load the FCNN architecture
-    int numLayers;
-    file.read(reinterpret_cast<char*>(&numLayers), sizeof(numLayers));
-
-    aiFCNN.clearNN();
-
-    // Load each layer
-    for(int i = 0; i < numLayers; i++)
-    {
-        loadLayers(file);
-    }
-
-
-    // Load CNN architecture
-    int numCNNLayers;
-    file.read(reinterpret_cast<char*>(&numCNNLayers), sizeof(numCNNLayers));
-
-    aiCNN.clearNN();
-
-    // Load each CNN layer
-    for(int i = 0; i < numCNNLayers; i++)
-    {
-        loadConvLayers(file);
-    }
-
-    file.close();
-}  //----- End of loadModelFromFile
-
-
-void DQN::loadReplayBufferFromFile(const string& filename, int &trainingStep)
-// Algorithm : Load the replay buffer and training parameters from a file
-{
-    ifstream file(filename, ios::binary);
-    if(!file) {
-        cout << "> Cannot open file for reading: " << filename << endl;
-        return;
-    }
-
-    // Clear existing buffer
-    replayBuffer.clearReplayBuffer();
-
-    // Load buffer size
-    int bufferSize;
-    file.read(reinterpret_cast<char*>(&bufferSize), sizeof(bufferSize));
-
-    // Load each transition
-    for(int i = 0; i < bufferSize; i++) {
-        Transition t;
-
-        // Load reward and done flag
-        file.read(reinterpret_cast<char*>(&t.reward), sizeof(float));
-        file.read(reinterpret_cast<char*>(&t.done), sizeof(bool));
-        file.read(reinterpret_cast<char*>(&t.tdError), sizeof(float));
-
-        // Load state vectors
-        loadVector(file, t.boardState);
-        loadVector(file, t.extraState);
-        loadVector(file, t.nextBoardState);
-        loadVector(file, t.nextExtraState);
-
-        // Load action
-        loadString(file, t.action);
-
-        // Add to buffer
-        replayBuffer.push(t);
-    }
-
-    // Load training parameters
-    file.read(reinterpret_cast<char*>(&trainingStep), sizeof(trainingStep));
-    file.read(reinterpret_cast<char*>(&epsilon), sizeof(epsilon));
-
-    file.close();
-}  //----- End of loadReplayBufferFromFile
-
-
-//-------------------------------------------------------------- PROTECTED
-void DQN::saveLayer(ofstream &file, const FullyConnectedLayer &layer)
-// Algorithm : Save the parameters of a fully connected layer to a file
-{
-    // Save layer type
-    saveString(file, layer.type);
-
-    // Save dimensions
-    file.write(reinterpret_cast<const char*>(&layer.inputSize), sizeof(int));
-    file.write(reinterpret_cast<const char*>(&layer.outputSize), sizeof(int));
-
-    // Save weights
-    for(const auto &row : layer.weights) {
-        for(float w : row) {
-            file.write(reinterpret_cast<const char*>(&w), sizeof(float));
-        }
-    }
-
-    // Save biases
-    for(float b : layer.biases) {
-        file.write(reinterpret_cast<const char*>(&b), sizeof(float));
-    }
-}  //----- End of saveLayer
-
-
-void DQN::saveConvLayer(ofstream &file, const ConvolutionalLayer &layer)
-// Algorithm : Save the parameters of a convolutional layer to a file
-{
-    // Save layer type
-    saveString(file, layer.type);
-
-    // Save dimensions and parameters
-    file.write(reinterpret_cast<const char*>(&layer.kernelSize), sizeof(int));
-    file.write(reinterpret_cast<const char*>(&layer.stride), sizeof(int));
-    file.write(reinterpret_cast<const char*>(&layer.padding), sizeof(int));
-    file.write(reinterpret_cast<const char*>(&layer.outputChannels), sizeof(int));
-    file.write(reinterpret_cast<const char*>(&layer.inputChannels), sizeof(int));
-
-    // Save weights
-    for(int ic = 0; ic < layer.inputChannels; ic++) {
-        for(int oc = 0; oc < layer.outputChannels; oc++) {
-            for(int kh = 0; kh < layer.kernelSize; kh++) {
-                for(int kw = 0; kw < layer.kernelSize; kw++) {
-                    file.write(reinterpret_cast<const char*>(&layer.weights[ic][oc][kh][kw]), sizeof(float));
-                }
-            }
-        }
-    }
-
-    // Save biases
-    for(float b : layer.biases) {
-        file.write(reinterpret_cast<const char*>(&b), sizeof(float));
-    }
-}  //----- End of saveConvLayer
-
-
-void DQN::saveVector(ofstream& file, const vector<float>& vec)
-// Algorithm : Save a vector of floats to a file
-{
-    int size = vec.size();
-    file.write(reinterpret_cast<const char*>(&size), sizeof(int));
-
-    if(size > 0) {
-        file.write(reinterpret_cast<const char*>(vec.data()), size * sizeof(float));
-    }
-}  //----- End of saveVector
-
-
-void DQN::saveString(ofstream& file, const string& str)
-// Algorithm : Save a string to a file
-{
-    int size = str.size();
-    file.write(reinterpret_cast<const char*>(&size), sizeof(int));
-    file.write(str.data(), size);
-}  //----- End of saveString
-
-
-void DQN::loadLayers(ifstream &file)
-// Algorithm : Load the parameters of a fully connected layer from a file
-// and add the layers to the FCNN
-{
-    // Load layer type
-    string layerType;
-    loadString(file, layerType);
-
-    // Load dimensions
-    int inputSize, outputSize;
-    file.read(reinterpret_cast<char*>(&inputSize), sizeof(inputSize));
-    file.read(reinterpret_cast<char*>(&outputSize), sizeof(outputSize));
-
-    // Add layer to network
-    aiFCNN.addLayer(layerType, outputSize, inputSize);
-
-    // Load weights
-    Matrix<float> tmpWeights(inputSize, outputSize);
-    for(auto &row : tmpWeights) {
-        for(float &w : row) {
-            file.read(reinterpret_cast<char*>(&w), sizeof(w));
-        }
-    }
-    aiFCNN.getNN().back().weights = tmpWeights;
-
-    // Load biases
-    vector<float> tmpBiases(outputSize, 0.0);  // initialise bias to 0
-    for(float &b : tmpBiases) {
-        file.read(reinterpret_cast<char*>(&b), sizeof(b));
-    }
-    aiFCNN.getNN().back().biases = tmpBiases;
-}  //----- End of loadLayers
-
-
-void DQN::loadConvLayers(ifstream &file)
-// Algorithm : Load the parameters of a convolutional layer from a file
-// and add the layers to the CNN
-{
-    // Load layer parameters
-    string layerType;
-    loadString(file, layerType);
-
-    int kernelSize, stride, padding, outputChannels, inputChannels;
-    file.read(reinterpret_cast<char*>(&kernelSize), sizeof(kernelSize));
-    file.read(reinterpret_cast<char*>(&stride), sizeof(stride));
-    file.read(reinterpret_cast<char*>(&padding), sizeof(padding));
-    file.read(reinterpret_cast<char*>(&outputChannels), sizeof(outputChannels));
-    file.read(reinterpret_cast<char*>(&inputChannels), sizeof(inputChannels));
-
-    // Compute the output size with padding
-    pair<int, int> outputSize;
-    if (aiCNN.getNNSize() == 0)  // First layer
-    {
-        outputSize = {(config.H + 2*padding - kernelSize)/stride + 1, (config.W + 2*padding - kernelSize)/stride + 1};
-    }
-    else
-    {
-        outputSize = {(aiCNN.getNN().back().outputSize.first + 2*padding - kernelSize)/stride + 1,
-                         (aiCNN.getNN().back().outputSize.second + 2*padding - kernelSize)/stride + 1};
-    }
-
-    // Add layer to network
-    aiCNN.addLayer(layerType, kernelSize, stride, padding, outputChannels, outputSize, inputChannels);
-
-    // Load weights and biases
-    Matrix<Matrix<float>> tmpWeights(inputChannels, outputChannels,
-        Matrix<float>(kernelSize, kernelSize, 0.0));
-    vector<float> tmpBiases(outputChannels, 0.0);
-    for(int ic = 0; ic < inputChannels; ic++) {
-        for(int oc = 0; oc < outputChannels; oc++) {
-            for(int kh = 0; kh < kernelSize; kh++) {
-                for(int kw = 0; kw < kernelSize; kw++) {
-                    file.read(reinterpret_cast<char*>(&tmpWeights[ic][oc][kh][kw]),
-                             sizeof(float));
-                }
-            }
-        }
-    }
-
-    for(int oc = 0; oc < outputChannels; oc++) {
-        file.read(reinterpret_cast<char*>(&tmpBiases[oc]), sizeof(float));
-    }
-    aiCNN.getNN().back().weights = tmpWeights;
-    aiCNN.getNN().back().biases = tmpBiases;
-}  //----- End of loadConvLayers
-
-
-void DQN::loadVector(ifstream& file, vector<float>& vec)
-// Algorithm : Load a vector of floats from a file
-{
-    int size;
-    file.read(reinterpret_cast<char*>(&size), sizeof(int));
-
-    vec.resize(size);
-    if(size > 0) {
-        file.read(reinterpret_cast<char*>(vec.data()), size * sizeof(float));
-    }
-}  //----- End of loadVector
-
-
-void DQN::loadString(ifstream& file, string& str)
-// Algorithm : Load a string from a file
-{
-    int size;
-    file.read(reinterpret_cast<char*>(&size), sizeof(int));
-
-    str.resize(size);
-    if(size > 0) {
-        file.read(&str[0], size);
-    }
-}  //----- End of loadString
-
-
-inline void DQN::decayEpsilon()
-// Algorithm : Decay epsilon to gradually shift from exploration to exploitation
+void DQN::decayEpsilon()
+// Algorithm : Reduce the exploration rate while respecting its configured floor.
 {
     if (epsilon > minEpsilon)
     {
-        epsilon *= epsilonDecay;
+        epsilon = max(minEpsilon, epsilon * epsilonDecay);
     }
-}  //----- End of decayEpsilon
-
-
-vector<float> combineFeatures(const vector<float> &boardState, const vector<float> &extras)
-// Algorithm : Combine the board state and extra features into a single vector
-{
-    vector<float> combined(boardState.size() + extras.size());
-    copy(boardState.begin(), boardState.end(), combined.begin());
-    copy(extras.begin(), extras.end(), combined.begin() + boardState.size());
-
-    return combined;
-}  //----- End of combineFeatures
+}  //----- end of decayEpsilon

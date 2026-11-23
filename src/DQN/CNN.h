@@ -23,15 +23,6 @@ CNN - A convolution neural network
 #include "NeuralNetwork.h"
 
 //------------------------------------------------------------------ Types
-struct ConvLayerConfig {
-    std::string type = "ReLU";
-    int kernelSize = 1;
-    int stride = 1;
-    int padding = 0;
-    int outputChannels = 1;
-};
-
-
 struct ConvolutionalLayer {
     std::string type;
     int inputChannels;

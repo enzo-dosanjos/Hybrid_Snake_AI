@@ -161,6 +161,15 @@ struct FeatureSelection {
 };
 
 
+struct ConvLayerConfig {
+    std::string type = "ReLU";
+    int kernelSize = 1;
+    int stride = 1;
+    int padding = 0;
+    int outputChannels = 1;
+};
+
+
 struct ModelConfig {
     int numPlayers = 2;
     int featureSchemaVersion = EXTRA_FEATURE_SCHEMA_VERSION;
@@ -173,6 +182,12 @@ struct ModelConfig {
     float epsilon = 1.f;
     float minEpsilon = 0.01f;
     float epsilonDecay = 0.995f;
+    std::vector<ConvLayerConfig> convolutionLayers = {
+        {"ReLU", 3, 1, 1, 16},
+        {"ReLU", 3, 1, 1, 32}
+    };
+    // Hidden layers use ReLU. DQN adds the four linear action outputs.
+    std::vector<int> denseHiddenSizes = {64, 32};
 };
 
 
