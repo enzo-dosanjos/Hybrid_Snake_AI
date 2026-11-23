@@ -1,0 +1,3 @@
+checkpoint episode=6 updates=308
+evaluation episode=6 updates=308 wins=1/4 win_rate=0.25 mean_survival_turns=30.75
+profile play_seconds=6.06436 update_seconds=9.09085 loop_seconds=15.3526

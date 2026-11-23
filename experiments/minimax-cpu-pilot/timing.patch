@@ -1,0 +1,53 @@
+--- a/train.cpp
++++ b/train.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ /*************************************************************************
+ train - Runs and resumes neural Snake training
+                              -------------------
+@@ -217,19 +218,26 @@
+     auto behavior = makeNeuralAgent(learner, config.hybridWeight, true, params);
+     auto evaluated = makeNeuralAgent(learner, config.hybridWeight, false, params);
+ 
++    using Clock = std::chrono::steady_clock;
++    double playSeconds = 0, updateSeconds = 0;
++    auto trainingStart = Clock::now();
+     for (int episode = 0; episode < config.episodes; episode++)
+     {
+         GameEngine engine = initial;
+         int startingUpdates = updates;
+ 
+-        while (auto transition = playLearnerDecision(engine, *behavior, opponents, reward,
+-                                                     learner.getFeatureSelection()))
+-        {
++        while (true)
++        {
++            auto start = Clock::now();
++            auto transition = playLearnerDecision(engine, *behavior, opponents, reward, learner.getFeatureSelection());
++            playSeconds += std::chrono::duration<double>(Clock::now() - start).count();
++            if (!transition) break;
+             if (updates == numeric_limits<int>::max())
+             {
+                 throw overflow_error("Training step limit reached");
+             }
+ 
++            start = Clock::now();
+             learner.remember(*transition);
+             learner.train(config.batchSize, config.learningRate);
+             updates++;
+@@ -239,6 +247,7 @@
+                 learner.updateTargetNetworks();
+             }
+ 
++            updateSeconds += std::chrono::duration<double>(Clock::now() - start).count();
+             if (transition->done)
+             {
+                 break;
+@@ -266,6 +275,7 @@
+                  << " mean_survival_turns=" << result.meanSurvivalTurns << endl;
+         }
+     }
++    cout << "profile play_seconds=" << playSeconds << " update_seconds=" << updateSeconds << " loop_seconds=" << std::chrono::duration<double>(Clock::now() - trainingStart).count() << endl;
+ }  //----- end of runTraining
+ 
+ 
