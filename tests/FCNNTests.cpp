@@ -72,7 +72,7 @@ void accumulate(FCNN &network, const vector<float> &input)
     }
 
     network.backPropagation(error);
-    network.accumulateGradient();
+    network.accumulateGradients();
 }  //----- end of accumulate
 
 
@@ -98,14 +98,20 @@ void testForwardPropagation()
 
 
 void testNumericalGradients()
-// Algorithm : Tests every weight and bias gradient against finite differences and verifies that the first layer learns.
+// Algorithm : Checks the parameter and input gradients against independent finite differences.
 {
     FCNN network(2, mt19937(42));
     network.addLayer("ReLU", 3);
     network.addLayer("linear", 2);
     vector<float> input{0.7f, -1.2f};
-    network.resetGradients();
-    accumulate(network, input);
+    auto error = network.forwardPropagation(input);
+    for (float &value : error)
+    {
+        value -= 1.f;
+    }
+
+    auto inputGradient = network.backPropagation(error);
+    network.accumulateGradients();
     auto layers = network.getNN();
     const float step = 1e-3f;
     float firstLayerGradient = 0.f;
@@ -143,7 +149,40 @@ void testNumericalGradients()
     }
 
     check(firstLayerGradient > 1e-5f, "First layer never receives a gradient");
+    check(inputGradient.size() == input.size(), "Input gradient size differs");
+    for (size_t index = 0; index < input.size(); index++)
+    {
+        // Perturb one input feature while holding the weights fixed.
+        auto plus = input;
+        auto minus = input;
+        plus[index] += step;
+        minus[index] -= step;
+        float expected = (referenceLoss(layers, plus) - referenceLoss(layers, minus)) / (2*step);
+        checkNear(inputGradient[index], expected, "FCNN input gradient", 0.001f, 0.01f);
+    }
 }  //----- end of testNumericalGradients
+
+
+void testOutputReluGradient()
+// Algorithm : Tests that the final ReLU passes gradients only for positive preactivations.
+{
+    FCNN network(1, mt19937(42));
+    network.addLayer("ReLU", 1);
+    float weight = network.getNN()[0].weights[0][0];
+    float sign = weight > 0.f ? 1.f : -1.f;
+
+    network.forwardPropagation({-sign});
+    checkNear(network.backPropagation({2.f})[0], 0.f, "Inactive output input gradient");
+    network.accumulateGradients();
+
+    network.forwardPropagation({sign});
+    checkNear(network.backPropagation({2.f})[0], 2.f*weight, "Active output input gradient");
+    network.accumulateGradients();
+
+    const auto layer = network.getNN()[0];
+    checkNear(layer.biasGradient[0], 2.f, "Inactive output contributed to the bias gradient");
+    checkNear(layer.weightGradient[0][0], 2.f*sign, "Incorrect output weight gradient");
+}  //----- end of testOutputReluGradient
 
 
 void testAccumulationAndReset()
@@ -222,6 +261,7 @@ vector<TestCase> getTests()
     return {
         {"forward_propagation", testForwardPropagation},
         {"numerical_gradients", testNumericalGradients},
+        {"output_relu_gradient", testOutputReluGradient},
         {"accumulation_and_reset", testAccumulationAndReset},
         {"update_and_copy", testUpdateAndCopy}
     };

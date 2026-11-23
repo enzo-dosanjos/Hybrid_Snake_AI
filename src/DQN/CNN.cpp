@@ -8,177 +8,299 @@ CNN - A convolution neural network
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
-#include <iostream>
+#include <algorithm>
+#include <limits>
+#include <stdexcept>
+#include <utility>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
 #include "CNN.h"
 
+//---------------------------------------------------------------- PRIVATE
+static pair<int, int> spatialSize(const FeatureTensor &input)
+// Algorithm : Validate a nonempty rectangular channels-first tensor and return its height and width.
+{
+    if (input.empty() || input.front().empty() || input.front().front().empty())
+    {
+        throw invalid_argument("CNN tensor must have positive dimensions");
+    }
+
+    size_t height = input.front().size();
+    size_t width = input.front().front().size();
+    if (height > numeric_limits<int>::max() || width > numeric_limits<int>::max())
+    {
+        throw invalid_argument("CNN tensor is too large");
+    }
+
+    for (const auto &channel : input)
+    {
+        if (channel.size() != height)
+        {
+            throw invalid_argument("CNN tensor channels must have the same height");
+        }
+
+        for (const auto &row : channel)
+        {
+            if (row.size() != width)
+            {
+                throw invalid_argument("CNN tensor rows must have the same width");
+            }
+        }
+    }
+
+    return {height, width};
+}  //----- end of spatialSize
+
+
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-void CNN::addLayer (string type, int kernelSize, int stride, const int padding, int outputC, pair<int, int> outputSize,  int inputC)
-// Algorithm : Add a convolutional layer to the neural network by
-// initialising the type of the activation function, the input and output size
+CNN::CNN(int inputChannels, const mt19937 &p_gen) : nnInputChannels(inputChannels), gen(p_gen)
+// Algorithm : Store the channel count and random generator used to initialize the convolution kernels.
 {
+    if (inputChannels <= 0)
+    {
+        throw invalid_argument("CNN input channel count must be positive");
+    }
+}  //----- end of CNN
+
+
+void CNN::addLayer(const ConvLayerConfig &config)
+// Algorithm : Initialize a convolutional layer whose input channels match the preceding output.
+{
+    if ((config.type != "ReLU" && config.type != "linear") ||
+        config.kernelSize <= 0 || config.stride <= 0 ||
+        config.padding < 0 || config.outputChannels <= 0)
+    {
+        throw invalid_argument("Invalid convolution layer configuration");
+    }
+
     ConvolutionalLayer layer;
+    layer.type = config.type;
+    layer.inputChannels = nn.empty() ? nnInputChannels : nn.back().outputChannels;
+    layer.outputChannels = config.outputChannels;
+    layer.kernelSize = config.kernelSize;
+    layer.stride = config.stride;
+    layer.padding = config.padding;
+    Matrix<float> kernel(layer.kernelSize, layer.kernelSize);
+    layer.weights = Matrix<Matrix<float>>(layer.outputChannels, layer.inputChannels, kernel);
+    layer.biases.resize(layer.outputChannels);
+    layer.weightGradient = layer.weights;
+    layer.biasGradient.resize(layer.outputChannels);
 
-    layer.type = type;
-    layer.kernelSize = kernelSize;
-    layer.stride = stride;
-    layer.padding = padding;
-    layer.outputChannels = outputC;
-    layer.outputSize = outputSize;
-
-    // get the input size either from parameters or from the previous layer's output
-    if (inputC == -1)
+    uniform_real_distribution<float> dist(-0.1f, 0.1f);
+    for (auto &inputChannel : layer.weights)
     {
-        layer.inputChannels = (nn.empty()) ? nnInputSize : nn.back().outputChannels;
-    }
-    else
-    {
-        layer.inputChannels = inputC;
+        for (auto &outputChannel : inputChannel)
+        {
+            for (auto &row : outputChannel)
+            {
+                for (float &weight : row)
+                {
+                    weight = dist(gen);
+                }
+            }
+        }
     }
 
-    layer.position = nn.size();
-
-    nn.push_back(layer);
-    initLayer(nn.back());
+    nn.push_back(move(layer));
 }  //----- end of addLayer
 
 
-void CNN::copyWeights (const CNN &src)
-// Algorithm : Copy the weights and biases of the convolutional layers
+void CNN::copyWeights(const CNN &src)
+// Algorithm : Verify convolution geometry and activations before copying only weights and biases.
 {
-    // copy weights and biases of the convolutional layers
-    for (int layer = 0; layer < nn.size(); layer++)
+    if (nnInputChannels != src.nnInputChannels || nn.size() != src.nn.size())
     {
-        nn[layer].weights = src.nn[layer].weights;
-        nn[layer].biases = src.nn[layer].biases;
+        throw invalid_argument("Incompatible convolutional networks");
     }
-}  //----- End of copyWeights
+
+    for (size_t index = 0; index < nn.size(); index++)
+    {
+        const auto &destination = nn[index];
+        const auto &source = src.nn[index];
+        if (destination.type != source.type || destination.outputChannels != source.outputChannels ||
+            destination.kernelSize != source.kernelSize ||
+            destination.stride != source.stride || destination.padding != source.padding)
+        {
+            throw invalid_argument("Incompatible convolutional layers");
+        }
+    }
+
+    for (size_t index = 0; index < nn.size(); index++)
+    {
+        nn[index].weights = src.nn[index].weights;
+        nn[index].biases = src.nn[index].biases;
+    }
+}  //----- end of copyWeights
 
 
-Matrix<vector<float>> CNN::forwardPropagation(const Matrix<vector<float>> &input)
-// Algorithm : Compute the output of the neural network by propagating the input
+FeatureTensor CNN::forwardPropagation(const BoardTensor &input)
+// Algorithm : Validate the spatial dimensions, then convolve each layer in order and cache the activations.
 {
+    if (nn.empty())
+    {
+        throw logic_error("CNN has no layers");
+    }
+
+    if (input.size() != static_cast<size_t>(nnInputChannels))
+    {
+        throw invalid_argument("Wrong CNN input channel count");
+    }
+
+    auto [height, width] = spatialSize(input);
+    for (const auto &layer : nn)
+    {
+        long long paddedHeight = height + 2LL*layer.padding;
+        long long paddedWidth = width + 2LL*layer.padding;
+        if (paddedHeight < layer.kernelSize || paddedWidth < layer.kernelSize ||
+            paddedHeight > numeric_limits<int>::max() || paddedWidth > numeric_limits<int>::max())
+        {
+            throw invalid_argument("Invalid padded dimensions for convolution");
+        }
+
+        height = (paddedHeight - layer.kernelSize) / layer.stride + 1;
+        width = (paddedWidth - layer.kernelSize) / layer.stride + 1;
+    }
+
+    const FeatureTensor *activation = &input;
     for (auto &layer : nn)
     {
-        if (layer.position == 0)
-        {
-            // The first layer directly receives the input
-            convolution(layer, input);
-        }
-        else
-        {
-
-            // For the next layers, it uses the previous layer's output
-            convolution(layer);
-        }
+        convolution(layer, *activation);
+        activation = &layer.output;
     }
 
     return nn.back().output;
-}  //----- End of forwardPropagation
+}  //----- end of forwardPropagation
 
 
-vector<float> CNN::globalAvgPooling(const Matrix<vector<float>> &input)
-// Algorithm : Compute the global average pooling of the input
+vector<float> CNN::globalAvgPooling(const FeatureTensor &input)
+// Algorithm : Divide each channel's sum by the spatial area of the feature maps.
 {
-    vector<float> output(input.size(), 0.0);
-
-    // for each channel
-    for(int c = 0; c < input.size(); c++)
+    if (input.empty())
     {
-        float sum = 0.0;
+        return {};
+    }
 
-        // for each cell
-        for(auto &row : input[c])
+    auto [height, width] = spatialSize(input);
+    float area = static_cast<float>(height) * width;
+    vector<float> output;
+    output.reserve(input.size());
+
+    for (const auto &channel : input)
+    {
+        float sum = 0.f;
+        for (const auto &row : channel)
         {
-            for(auto &val : row)
+            for (float value : row)
             {
-                // sum the values
-                sum += val;
+                sum += value;
             }
         }
 
-        // average the sum
-        output[c] = sum / (input[c].size() * input[c][0].size());
+        output.push_back(sum / area);
     }
 
     return output;
-}  //----- End of globalAvgPooling
+}  //----- end of globalAvgPooling
 
 
-void CNN::resetGradients ()
-// Algorithm : Reset the gradients of every layers
+FeatureTensor CNN::globalAvgPoolingBackward(const vector<float> &pooledGradient, const FeatureTensor &input)
+// Algorithm : Divide each pooled gradient equally among the cells that contributed to that channel's mean.
 {
-    // For each layer other than the input layer, put the gradients back to 0
-    for (int layer = 0; layer < nn.size(); layer++)
+    if (pooledGradient.size() != input.size())
     {
-        for (int i = 0; i < nn[layer].inputChannels; i++)
+        throw invalid_argument("Wrong pooled gradient size");
+    }
+
+    if (input.empty())
+    {
+        return {};
+    }
+
+    auto [height, width] = spatialSize(input);
+    float area = static_cast<float>(height) * width;
+    FeatureTensor gradient;
+    gradient.reserve(input.size());
+
+    for (float value : pooledGradient)
+    {
+        gradient.emplace_back(width, height, value / area);
+    }
+
+    return gradient;
+}  //----- end of globalAvgPoolingBackward
+
+
+void CNN::backPropagation(const FeatureTensor &error)
+// Algorithm : Gate each output gradient with its activation derivative and scatter it to the preceding layer.
+{
+    if (nn.empty() || nn.back().output.empty())
+    {
+        throw logic_error("CNN backward pass requires a forward pass");
+    }
+
+    auto [height, width] = spatialSize(error);
+    const auto &output = nn.back().output;
+    if (error.size() != output.size() ||
+        static_cast<size_t>(height) != output.front().size() ||
+        static_cast<size_t>(width) != output.front().front().size())
+    {
+        throw invalid_argument("Wrong CNN output gradient shape");
+    }
+
+    FeatureTensor gradient = error;
+    for (size_t index = nn.size(); index > 0; index--)
+    {
+        auto &layer = nn[index - 1];
+        layer.error = move(gradient);
+        if (layer.type == "ReLU")
         {
-            for (int j = 0; j < nn[layer].outputChannels; j++)
+            for (int out = 0; out < layer.outputChannels; out++)
             {
-                for (int k = 0; k < nn[layer].kernelSize; k++)
+                for (size_t y = 0; y < layer.output[out].size(); y++)
                 {
-                    fill(nn[layer].weightGradient[i][j][k].begin(), nn[layer].weightGradient[i][j][k].end(), 0.0);
+                    for (size_t x = 0; x < layer.output[out][y].size(); x++)
+                    {
+                        if (layer.output[out][y][x] <= 0.f)
+                        {
+                            layer.error[out][y][x] = 0.f;
+                        }
+                    }
                 }
             }
         }
 
-        fill(nn[layer].biasGradient.begin(), nn[layer].biasGradient.end(), 0.0);
-    }
-}  //----- End of resetGradients
-
-
-void CNN::backPropagation(const Matrix<vector<float>> &error)
-// Algorithm : Compute the error of every layer by backpropagating the error
-// from the last layer
-{
-    // Set the error of the last layer
-    nn.back().error = error;
-
-    for (auto it = nn.rbegin() + 1; it != nn.rend(); ++it)
-    {
-        ConvolutionalLayer &current_layer = *it;
-        ConvolutionalLayer &next_layer = nn[it->position + 1];
-
-        // Reset current layer's error to zero
-        for (int oc = 0; oc < current_layer.outputChannels; oc++)
+        if (index == 1)
         {
-            for (int h = 0; h < current_layer.outputSize.first; h++)
-            {
-                fill(current_layer.error[oc][h].begin(), current_layer.error[oc][h].end(), 0.0);
-            }
+            break;
         }
 
-        // Iterate over next layer's error positions
-        for (int nextoc = 0; nextoc < next_layer.outputChannels; nextoc++)
+        const auto &previousOutput = nn[index - 2].output;
+        int previousHeight = previousOutput.front().size();
+        int previousWidth = previousOutput.front().front().size();
+        gradient.assign(layer.inputChannels, Matrix<float>(previousWidth, previousHeight));
+
+        for (int out = 0; out < layer.outputChannels; out++)
         {
-            for (int ol1_h = 0; ol1_h < next_layer.outputSize.first; ol1_h++)
+            for (int y = 0; y < static_cast<int>(layer.error[out].size()); y++)
             {
-                for (int ol1_w = 0; ol1_w < next_layer.outputSize.second; ol1_w++)
+                for (int x = 0; x < static_cast<int>(layer.error[out][y].size()); x++)
                 {
-                    float layerError = next_layer.error[nextoc][ol1_h][ol1_w];
-
-                    // Iterate over kernel positions
-                    for (int kh = 0; kh < next_layer.kernelSize; kh++)
+                    for (int ky = 0; ky < layer.kernelSize; ky++)
                     {
-                        for (int kw = 0; kw < next_layer.kernelSize; kw++)
+                        for (int kx = 0; kx < layer.kernelSize; kx++)
                         {
-                            // Calculate corresponding position in current layer's output
-                            int ol_h = ol1_h * next_layer.stride - next_layer.padding + kh;
-                            int ol_w = ol1_w * next_layer.stride - next_layer.padding + kw;
-
-                            if (ol_h >= 0 && ol_h < current_layer.outputSize.first &&
-                                ol_w >= 0 && ol_w < current_layer.outputSize.second)
+                            // Undo the padding offset to scatter into the preceding unpadded activation.
+                            int inputY = y*layer.stride + ky - layer.padding;
+                            int inputX = x*layer.stride + kx - layer.padding;
+                            if (inputY >= 0 && inputY < previousHeight && inputX >= 0 && inputX < previousWidth)
                             {
-
-                                // Accumulate error for each input channel of the current layer
-                                for (int ic = 0; ic < current_layer.outputChannels; ic++)
+                                for (int in = 0; in < layer.inputChannels; in++)
                                 {
-                                    current_layer.error[ic][ol_h][ol_w] +=
-                                        layerError * next_layer.weights[ic][nextoc][kh][kw];
+                                    gradient[in][inputY][inputX] +=
+                                        layer.weights[in][out][ky][kx] * layer.error[out][y][x];
                                 }
                             }
                         }
@@ -186,210 +308,144 @@ void CNN::backPropagation(const Matrix<vector<float>> &error)
                 }
             }
         }
-
-        // Apply ReLU derivative
-        if (current_layer.type == "ReLU")
-        {
-            for (int oc = 0; oc < current_layer.outputChannels; oc++)
-            {
-                for (int h = 0; h < current_layer.outputSize.first; h++)
-                {
-                    for (int w = 0; w < current_layer.outputSize.second; w++)
-                    {
-                        current_layer.error[oc][h][w] *= (current_layer.output[oc][h][w] > 0 ? 1.0 : 0.0);
-                    }
-                }
-            }
-        }
     }
-} //----- end of backPropagation
+}  //----- end of backPropagation
 
 
-void CNN::accumulateGradient()
-// Algorithm : Accumulate the weight and bias gradients for every layer
+void CNN::resetGradients()
+// Algorithm : Clear all accumulated kernel and bias gradients.
 {
     for (auto &layer : nn)
     {
-        // For each output channel
-        for (int oc = 0; oc < layer.outputChannels; oc++)
+        for (auto &inputChannel : layer.weightGradient)
         {
-            // For each output cell
-            for (int oh = 0; oh < layer.outputSize.first; oh++)
+            for (auto &outputChannel : inputChannel)
             {
-                for (int ow = 0; ow < layer.outputSize.second; ow++)
+                for (auto &row : outputChannel)
                 {
+                    fill(row.begin(), row.end(), 0.f);
+                }
+            }
+        }
 
-                    // For each input channel
-                    for (int ic = 0; ic < layer.inputChannels; ic++)
+        fill(layer.biasGradient.begin(), layer.biasGradient.end(), 0.f);
+    }
+}  //----- end of resetGradients
+
+
+void CNN::accumulateGradients()
+// Algorithm : Sum the cached padded inputs times their output gradients over the convolution windows.
+{
+    if (nn.empty() || nn.back().error.empty())
+    {
+        throw logic_error("CNN gradient accumulation requires a backward pass");
+    }
+
+    for (auto &layer : nn)
+    {
+        for (int out = 0; out < layer.outputChannels; out++)
+        {
+            for (size_t y = 0; y < layer.error[out].size(); y++)
+            {
+                for (size_t x = 0; x < layer.error[out][y].size(); x++)
+                {
+                    float error = layer.error[out][y][x];
+                    layer.biasGradient[out] += error;
+
+                    for (int in = 0; in < layer.inputChannels; in++)
                     {
-                        // For each kernel cell
-                        for (int kh = 0; kh < layer.kernelSize; kh++)
+                        for (int ky = 0; ky < layer.kernelSize; ky++)
                         {
-                            for (int kw = 0; kw < layer.kernelSize; kw++)
+                            for (int kx = 0; kx < layer.kernelSize; kx++)
                             {
-                                int ih = oh * layer.stride + kh;
-                                int iw = ow * layer.stride + kw;
-
-                                if (ih >= 0 && ih < layer.input[ic].size() && iw >= 0 && iw < layer.input[ic][0].size())
-                                {
-                                    // Weight gradient
-                                    layer.weightGradient[ic][oc][kh][kw] += layer.input[ic][ih][iw] * layer.error[oc][oh][ow];
-                                }
+                                layer.weightGradient[in][out][ky][kx] +=
+                                    layer.input[in][y*layer.stride + ky][x*layer.stride + kx] * error;
                             }
                         }
                     }
-
-                    // Accumulate bias gradient
-                    layer.biasGradient[oc] += layer.error[oc][oh][ow];
                 }
             }
         }
     }
-} //----- end of accumulateGradient
+}  //----- end of accumulateGradients
 
 
-void CNN::updateWeights(float learning_rate)
-// Algorithm : Update the weights and biases of every layer according to the gradient
+void CNN::updateWeights(float learningRate)
+// Algorithm : Apply the accumulated gradient to every convolution kernel and bias.
 {
     for (auto &layer : nn)
     {
-        // Update weights
-        for (int oc = 0; oc < layer.outputChannels; oc++)
+        for (int out = 0; out < layer.outputChannels; out++)
         {
-            for (int ic = 0; ic < layer.inputChannels; ic++)
+            for (int in = 0; in < layer.inputChannels; in++)
             {
-                for (int kh = 0; kh < layer.kernelSize; kh++)
+                for (int ky = 0; ky < layer.kernelSize; ky++)
                 {
-                    for (int kw = 0; kw < layer.kernelSize; kw++)
+                    for (int kx = 0; kx < layer.kernelSize; kx++)
                     {
-                        layer.weights[ic][oc][kh][kw] -= learning_rate
-                                                       * layer.weightGradient[ic][oc][kh][kw];
+                        layer.weights[in][out][ky][kx] -= learningRate * layer.weightGradient[in][out][ky][kx];
                     }
                 }
             }
 
-            // Update biases
-            layer.biases[oc] -= learning_rate * layer.biasGradient[oc];
+            layer.biases[out] -= learningRate * layer.biasGradient[out];
         }
     }
-} //----- end of updateWeights
+}  //----- end of updateWeights
 
-//-------------------------------------------------------------- PROTECTED
-void CNN::initLayer (ConvolutionalLayer &layer)
-// Algorithm : Initialize the weights and biases of the layer
+
+//---------------------------------------------------------------- PRIVATE
+FeatureTensor CNN::padInput(const FeatureTensor &input, int padding)
+// Algorithm : Copy each channel into a zero-filled matrix with a border of the requested width.
 {
-    // Resize weights and biases matrices
-    layer.weights.resize(layer.inputChannels);
-    layer.biases.resize(layer.outputChannels, 0.0);  // initialise bias to 0
+    int height = input.front().size();
+    int width = input.front().front().size();
+    FeatureTensor padded(input.size(), Matrix<float>(width + 2*padding, height + 2*padding));
 
-    // initialise weight and bias gradients to 0
-    layer.weightGradient.resize(layer.inputChannels);
-    layer.biasGradient.resize(layer.outputChannels, 0.0);
-
-
-    // initialise weight array with random values
-    uniform_real_distribution<float> dist(-0.1, 0.1);  // Uniform distribution between -0.1 and 0.1;
-    for (int i = 0; i < layer.inputChannels; i++)
+    for (size_t channel = 0; channel < input.size(); channel++)
     {
-        layer.weights[i].resize(layer.outputChannels,
-                              Matrix<float>(layer.kernelSize, layer.kernelSize, 0.0));
-
-        layer.weightGradient[i].resize(layer.outputChannels,
-                                       Matrix<float>(layer.kernelSize, layer.kernelSize, 0.0));
-
-        for (int j = 0; j < layer.outputChannels; j++)
+        for (int y = 0; y < height; y++)
         {
-            for (int k = 0; k < layer.kernelSize; k++)
+            copy(input[channel][y].begin(), input[channel][y].end(), padded[channel][y + padding].begin() + padding);
+        }
+    }
+
+    return padded;
+}  //----- end of padInput
+
+
+void CNN::convolution(ConvolutionalLayer &layer, const FeatureTensor &input)
+// Algorithm : Cache the padded input and evaluate each kernel window plus bias and activation.
+{
+    layer.input = padInput(input, layer.padding);
+    int height = layer.input.front().size();
+    int width = layer.input.front().front().size();
+    int outputHeight = (height - layer.kernelSize) / layer.stride + 1;
+    int outputWidth = (width - layer.kernelSize) / layer.stride + 1;
+    layer.output.assign(layer.outputChannels, Matrix<float>(outputWidth, outputHeight));
+    layer.error.clear();
+
+    for (int out = 0; out < layer.outputChannels; out++)
+    {
+        for (int y = 0; y < outputHeight; y++)
+        {
+            for (int x = 0; x < outputWidth; x++)
             {
-                for (int l = 0; l < layer.kernelSize; l++)
+                float value = layer.biases[out];
+                for (int in = 0; in < layer.inputChannels; in++)
                 {
-                    layer.weights[i][j][k][l] = dist(gen);
-                }
-            }
-        }
-    }
-
-    // Resize and initialise error, output
-    layer.error.resize(layer.outputChannels,
-                       Matrix<float>(layer.outputSize.first, layer.outputSize.second, 0.0));
-    layer.output.resize(layer.outputChannels,
-                        Matrix<float>(layer.outputSize.first, layer.outputSize.second, 0.0));
-
-} //----- end of initLayer
-
-
-Matrix<vector<float>> CNN::padInput(const Matrix<vector<float>> &input, ConvolutionalLayer &layer)
-// Algorithm : Add padding to the input
-{
-    int inputH = input.empty() ? 0 : input[0].size();
-    int inputW = (inputH == 0) ? 0 : input[0][0].size();
-
-    Matrix<vector<float>> paddedInput(input.size(), inputH + 2*layer.padding, vector<float>(inputW + 2*layer.padding, 0.0f));
-
-    for(int c = 0; c < input.size(); c++)
-    {
-        for(int h = 0; h < inputH; h++)
-        {
-            for(int w = 0; w < inputW; w++)
-            {
-                paddedInput[c][h+layer.padding][w+layer.padding] = input[c][h][w];
-            }
-        }
-    }
-
-    return paddedInput;
-}
-
-
-void CNN::convolution (ConvolutionalLayer &layer, const Matrix<vector<float>> &in)
-// Algorithm : Compute the output of the layer by convolution
-{
-    Matrix<vector<float>> input = (layer.position == 0) ? in : nn[layer.position-1].output;
-
-    Matrix<vector<float>> paddedInput = padInput(input, layer);
-
-    layer.input = paddedInput;
-
-    // Convolution
-    for(int oc = 0; oc < layer.outputChannels; oc++)  // canals
-    {
-        for(int oh = 0; oh < layer.outputSize.first; oh++)  // board H
-        {
-            for(int ow = 0; ow < layer.outputSize.second; ow++)  // board W
-            {
-                float sum = 0.0;
-                for(int ic = 0; ic < layer.inputChannels; ic++)
-                {
-                    for(int kh = 0; kh < layer.kernelSize; kh++)  // kernel height
+                    for (int ky = 0; ky < layer.kernelSize; ky++)
                     {
-                        for(int kw = 0; kw < layer.kernelSize; kw++)  // kernel width
+                        for (int kx = 0; kx < layer.kernelSize; kx++)
                         {
-                            int ih = oh*layer.stride + kh;
-                            int iw = ow*layer.stride + kw;
-                            sum += paddedInput[ic][ih][iw] * layer.weights[ic][oc][kh][kw];
+                            value += layer.input[in][y*layer.stride + ky][x*layer.stride + kx] *
+                                     layer.weights[in][out][ky][kx];
                         }
                     }
                 }
 
-                // activation functions
-                if (layer.type == "ReLU")
-                {
-                    layer.output[oc][oh][ow] = ReLU(sum + layer.biases[oc]);
-                }
+                layer.output[out][y][x] = layer.type == "ReLU" ? max(0.f, value) : value;
             }
         }
     }
-} //----- end of computeLayer
-
-
-float CNN::ReLU(const float &input)
-// Algorithm : Apply the ReLU activation function to the input
-{
-    float output = input;
-    if (output < 0)
-    {
-      output = 0;
-    }
-
-    return output;
-} //----- end of ReLU
+}  //----- end of convolution

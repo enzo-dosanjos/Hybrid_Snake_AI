@@ -10,196 +10,87 @@ FCNN - A fully connected neural network
 
 //------------------------------------------------------------------------
 // Role of the <FCNN> module
-// The FCNN module implements a fully connected neural network (FCNN) that
-// is used to implement a Q-learning agent.
+// Maps pooled board channels and extra features to dense network outputs.
 //------------------------------------------------------------------------
 
-//-------------------------------------------------------- Used interfaces
-#include "Structs.h"
-#include "ReplayBuffer.h"
-#include "Reward.h"
+//--------------------------------------------------------- System Include
+#include <random>
+#include <string>
+#include <vector>
 
-//-------------------------------------------------------------- Constants
+//-------------------------------------------------------- Used interfaces
+#include "../Structs.h"
+#include "NeuralNetwork.h"
 
 //------------------------------------------------------------------ Types
 struct FullyConnectedLayer {
-    int position;             // position in the neural network
-
-    std::string type;         // activation function (ex: ReLU)
+    std::string type;
     int inputSize;
     int outputSize;
 
+    std::vector<float> input;
+    std::vector<float> output;
+    std::vector<float> error;
+
     Matrix<float> weights;
     std::vector<float> biases;
-    std::vector<float> output;
-
     Matrix<float> weightGradient;
     std::vector<float> biasGradient;
-    std::vector<float> error;
 };
 
 
 //----------------------------------------------------------------- PUBLIC
-class FCNN
-{
+class FCNN : public NeuralNetwork {
 //--------------------------------------------------------- Public Methods
     public:
-        void addLayer (
-            const std::string &type,
-            int outputSize,
-            int inputSize = -1
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        void addLayer(const std::string &type, int outputSize);
+        // Contract : Infer the input size from the preceding layer or constructor.
 
-        void copyWeights (
-            const FCNN &src
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        void copyWeights(const FCNN &src);
+        // Contract : Copy only parameters between networks with matching architectures.
 
-        std::vector<float> forwardPropagation(
-            const std::vector<float> &input
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        std::vector<float> forwardPropagation(const std::vector<float> &input);
+        // Contract : Cache one sample's input and layer activations.
 
-        void resetGradients ();
-        // Usage :
-        //
-        // Contract :
-        //
+        std::vector<float> backPropagation(const std::vector<float> &error);
+        // Contract : Backpropagate the gradient with respect to the latest forward output.
+        // Return the gradient with respect to the original input.
 
-        void backPropagation(
-            const std::vector<float> &error
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void accumulateGradient();
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void updateWeights(
-            float learning_rate
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        void resetGradients() override;
+        void accumulateGradients() override;
+        void updateWeights(float learningRate) override;
 
 //--------------------------------------------------------- SETTERS/GETTERS
-        std::vector<float> getError(
-            int layer
-        ) const
-        {
-            return nn[layer].error;
-        }
-        // Usage :
-        //
-        // Contract :
-        //
-
         int getNNSize() const
+        // Algorithm : Return the number of configured layers.
         {
             return nn.size();
-        }
-        // Usage :
-        //
-        // Contract :
-        //
+        }  //----- end of getNNSize
+
 
         std::vector<FullyConnectedLayer> getNN() const
+        // Algorithm : Return a snapshot of the layers and their training state.
         {
             return nn;
-        }
-        // Usage :
-        //
-        // Contract :
-        //
+        }  //----- end of getNN
+
 
         void clearNN()
+        // Algorithm : Remove all configured layers and their cached state.
         {
             nn.clear();
-        }
+        }  //----- end of clearNN
 
 //---------------------------------------------- Constructors - destructor
-        FCNN (
-            int inputSize,
-            const std::mt19937 &p_gen
-        ) : nnInputSize(inputSize),
-            gen(p_gen)
-        {
-            #ifdef MAP
-                        cout << "Calling the constructor of fcnn" << endl;
-            #endif
-        }
-
-//-------------------------------------------------------------- PROTECTED
-    protected:
-        void initLayer (
-            FullyConnectedLayer &layer
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void computeLayer (
-            FullyConnectedLayer &layer,
-            const std::vector<float> &in = std::vector<float>()
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        static std::vector<float> ReLU(
-            const std::vector<float> &input
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        static std::vector<float> multiplyMatrices(
-            const std::vector<float> &row,
-            const Matrix<float> &mat
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        static std::vector<float> addMatrices(
-            const std::vector<float> &row,
-            const std::vector<float> &column
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        FCNN(int inputSize, const std::mt19937 &p_gen);
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        // NN Components
+        static void computeLayer(FullyConnectedLayer &layer, const std::vector<float> &input);
+
         std::vector<FullyConnectedLayer> nn;
         int nnInputSize;
-
-        // random number generator for layer initialization
         std::mt19937 gen;
 };
-
-
 
 #endif //FCNN_H

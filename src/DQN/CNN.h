@@ -10,194 +10,108 @@ CNN - A convolution neural network
 
 //------------------------------------------------------------------------
 // Role of the <CNN> module
-// the CNN module implements a convolutional neural network (CNN) that is
-// used to implement a Q-learning agent. The CNN is used to process the
-// board state that can have variable size.
+// Processes variable-size boards using convolution and channel-wise pooling.
 //------------------------------------------------------------------------
 
-//---------------------------------------------------------------  INCLUDE
+//--------------------------------------------------------- System Include
 #include <random>
+#include <string>
+#include <vector>
 
 //-------------------------------------------------------- Used interfaces
-#include "Structs.h"
+#include "../Structs.h"
+#include "NeuralNetwork.h"
 
 //------------------------------------------------------------------ Types
-struct ConvolutionalLayer {
-    int position;             // position in the neural network
+struct ConvLayerConfig {
+    std::string type = "ReLU";
+    int kernelSize = 1;
+    int stride = 1;
+    int padding = 0;
+    int outputChannels = 1;
+};
 
-    std::string type;         // activation function (ex: ReLU)
+
+struct ConvolutionalLayer {
+    std::string type;
     int inputChannels;
     int outputChannels;
-    std::pair<int, int> outputSize;
-
     int kernelSize;
-
     int stride;
     int padding;
 
-    Matrix<std::vector<float>> input;
+    // Activations are indexed by [channel][y][x]. The input includes zero padding.
+    FeatureTensor input;
+    FeatureTensor output;
+    FeatureTensor error;
 
-    // 4D weights: [inputChannels][outputChannels][kernelSize][kernelSize]
+    // Kernels are indexed by [input channel][output channel][kernel y][kernel x].
     Matrix<Matrix<float>> weights;
     std::vector<float> biases;
-    Matrix<std::vector<float>> output;
-
     Matrix<Matrix<float>> weightGradient;
     std::vector<float> biasGradient;
-
-    Matrix<std::vector<float>> error;
 };
 
 
 //----------------------------------------------------------------- PUBLIC
-class CNN
-{
+class CNN : public NeuralNetwork {
 //--------------------------------------------------------- Public Methods
     public:
-        void addLayer (
-            std::string type,
-            int kernelSize,
-            int stride,
-            int padding,
-            int outputC,
-            std::pair<int, int> outputSize,
-            int inputC = -1
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        void addLayer(const ConvLayerConfig &config);
+        // Contract : Infer input channels from the preceding layer or constructor.
 
-        void copyWeights(
-            const CNN &src
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        void copyWeights(const CNN &src);
+        // Contract : Copy only parameters between networks with matching architectures.
 
-        Matrix<std::vector<float>> forwardPropagation(
-            const Matrix<std::vector<float>> &input
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        FeatureTensor forwardPropagation(const BoardTensor &input);
+        // Contract : Cache one sample's activations and derive each output shape from its input.
 
-        static std::vector<float> globalAvgPooling(
-            const Matrix<std::vector<float>> &input
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        static std::vector<float> globalAvgPooling(const FeatureTensor &input);
+        // Contract : Return the spatial mean of each feature channel.
 
-        void resetGradients ();
-        // Usage :
-        //
-        // Contract :
-        //
+        static FeatureTensor globalAvgPoolingBackward(const std::vector<float> &pooledGradient,
+                                                      const FeatureTensor &input);
+        // Contract : Use the shape of the tensor that was pooled to distribute its channel gradients.
 
-        void backPropagation(
-            const Matrix<std::vector<float>> &error
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        void backPropagation(const FeatureTensor &error);
+        // Contract : Backpropagate the gradient with respect to the latest forward output.
 
-        void accumulateGradient();
-        // Usage :
-        //
-        // Contract :
-        //
-
-        void updateWeights(
-            float learning_rate
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
+        void resetGradients() override;
+        void accumulateGradients() override;
+        void updateWeights(float learningRate) override;
 
 //--------------------------------------------------------- SETTERS/GETTERS
-    int getNNSize() const
-    {
-        return nn.size();
-    }
-    // Usage :
-    //
-    // Contract :
-    //
+        int getNNSize() const
+        // Algorithm : Return the number of configured layers.
+        {
+            return nn.size();
+        }  //----- end of getNNSize
 
-    std::vector<ConvolutionalLayer> getNN() const
-    {
-        return nn;
-    }
-    // Usage :
-    //
-    // Contract :
-    //
 
-    void clearNN()
-    {
-        nn.clear();
-    }
+        std::vector<ConvolutionalLayer> getNN() const
+        // Algorithm : Return a snapshot of the layers and their training state.
+        {
+            return nn;
+        }  //----- end of getNN
 
+
+        void clearNN()
+        // Algorithm : Remove all configured layers and their cached state.
+        {
+            nn.clear();
+        }  //----- end of clearNN
 
 //---------------------------------------------- Constructors - destructor
-        CNN(
-              int inputSize,
-              const std::mt19937 &p_gen
-          ) : nnInputSize(inputSize),
-              gen(p_gen)
-        {
-            #ifdef MAP
-                cout << "Calling the constructor of cnn" << endl;
-            #endif
-        }
-
-//-------------------------------------------------------------- PROTECTED
-    protected:
-        void initLayer(
-            ConvolutionalLayer &layer
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        static Matrix<std::vector<float>> padInput(
-            const Matrix<std::vector<float>> &input,
-            ConvolutionalLayer &layer
-        );
-
-        void convolution (
-            ConvolutionalLayer &layer,
-            const Matrix<std::vector<float>> &in = Matrix<std::vector<float>>()
-        );
-        // Usage :
-        //<
-        // Contract :
-        //
-
-        static float ReLU(
-            const float &input
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        CNN(int inputChannels, const std::mt19937 &p_gen);
 
 //---------------------------------------------------------------- PRIVATE
     private:
-        std::vector<ConvolutionalLayer> nn;
-        int nnInputSize;
+        static FeatureTensor padInput(const FeatureTensor &input, int padding);
+        static void convolution(ConvolutionalLayer &layer, const FeatureTensor &input);
 
+        std::vector<ConvolutionalLayer> nn;
+        int nnInputChannels;
         std::mt19937 gen;
 };
-
-
 
 #endif //CNN_H

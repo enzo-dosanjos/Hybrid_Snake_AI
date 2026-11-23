@@ -8,243 +8,225 @@ FCNN - A fully connected neural network
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
-#include <iostream>
 #include <algorithm>
+#include <stdexcept>
+#include <utility>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
-#include "../include/FCNN.h"
+#include "FCNN.h"
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-void FCNN::addLayer (const string &type, const int outputSize, const int inputSize)
-// Algorithm : Add a fully connected layer to the neural network by
-// initialising the type of the activation function, the input and output size
+FCNN::FCNN(int inputSize, const mt19937 &p_gen) : nnInputSize(inputSize), gen(p_gen)
+// Algorithm : Store the size and random generator used to initialize the dense layers.
 {
+    if (inputSize <= 0)
+    {
+        throw invalid_argument("FCNN input size must be positive");
+    }
+}  //----- end of FCNN
+
+
+void FCNN::addLayer(const string &type, int outputSize)
+// Algorithm : Initialize a dense layer sized from the input or preceding layer.
+{
+    if ((type != "ReLU" && type != "linear") || outputSize <= 0)
+    {
+        throw invalid_argument("Invalid dense layer configuration");
+    }
+
     FullyConnectedLayer layer;
-
     layer.type = type;
+    layer.inputSize = nn.empty() ? nnInputSize : nn.back().outputSize;
     layer.outputSize = outputSize;
+    layer.weights = Matrix<float>(layer.outputSize, layer.inputSize);
+    layer.biases.resize(layer.outputSize);
+    layer.weightGradient = layer.weights;
+    layer.biasGradient.resize(layer.outputSize);
 
-    // get the input size either from parameters or from the previous layer's output
-    if (inputSize == -1)
+    uniform_real_distribution<float> dist(-0.1f, 0.1f);
+    for (auto &row : layer.weights)
     {
-        layer.inputSize = (nn.empty()) ? nnInputSize : nn.back().outputSize;
+        for (float &weight : row)
+        {
+            weight = dist(gen);
+        }
     }
-    else
-    {
-        layer.inputSize = inputSize;
-    }
 
-    layer.position = nn.size();
-
-    nn.push_back(layer);
-    initLayer(nn.back());
-} //----- end of addLayer
+    nn.push_back(move(layer));
+}  //----- end of addLayer
 
 
-void FCNN::copyWeights (const FCNN &src)
-// Algorithm : Copy the weights and biases of the fully connected layers
+void FCNN::copyWeights(const FCNN &src)
+// Algorithm : Check every layer for compatibility before copying parameters.
 {
-    // copy weights and biases of the fully connected layers
-    for (int layer = 0; layer < nn.size(); layer++)
+    if (nnInputSize != src.nnInputSize || nn.size() != src.nn.size())
     {
-        nn[layer].weights = src.nn[layer].weights;
-        nn[layer].biases = src.nn[layer].biases;
+        throw invalid_argument("Incompatible dense networks");
     }
-}  //----- End of copyWeights
+
+    for (size_t index = 0; index < nn.size(); index++)
+    {
+        if (nn[index].type != src.nn[index].type ||
+            nn[index].outputSize != src.nn[index].outputSize)
+        {
+            throw invalid_argument("Incompatible dense layers");
+        }
+    }
+
+    for (size_t index = 0; index < nn.size(); index++)
+    {
+        nn[index].weights = src.nn[index].weights;
+        nn[index].biases = src.nn[index].biases;
+    }
+}  //----- end of copyWeights
 
 
 vector<float> FCNN::forwardPropagation(const vector<float> &input)
-// Algorithm : Compute the output of the neural network by propagating the input
+// Algorithm : Evaluate each dense layer in order and replace the cached sample.
 {
+    if (nn.empty())
+    {
+        throw logic_error("FCNN has no layers");
+    }
+
+    if (input.size() != static_cast<size_t>(nnInputSize))
+    {
+        throw invalid_argument("Wrong FCNN input size");
+    }
+
+    const vector<float> *activation = &input;
     for (auto &layer : nn)
     {
-        if (layer.position == 0)
-        {
-            // The first layer directly receives the input
-            computeLayer(layer, input);
-        }
-        else
-        {
-            // For the next layers, it uses the previous layer's output
-            computeLayer(layer);
-        }
+        computeLayer(layer, *activation);
+        activation = &layer.output;
     }
 
     return nn.back().output;
-}  //----- End of forwardPropagation
+}  //----- end of forwardPropagation
 
 
-void FCNN::resetGradients ()
-// Algorithm : Reset the gradients of every layers
+vector<float> FCNN::backPropagation(const vector<float> &error)
+// Algorithm : Apply each activation derivative, then multiply by the weights to propagate to the preceding input.
 {
-    // For each layer other than the input layer, put the gradients back to 0
-    for (int layer = 1; layer < nn.size(); layer++)
+    if (nn.empty() || nn.back().output.empty())
     {
-        for (int i = 0; i < nn[layer].inputSize; i++)
+        throw logic_error("FCNN backward pass requires a forward pass");
+    }
+
+    if (error.size() != nn.back().output.size())
+    {
+        throw invalid_argument("Wrong FCNN output gradient size");
+    }
+
+    vector<float> gradient = error;
+    for (auto layer = nn.rbegin(); layer != nn.rend(); ++layer)
+    {
+        layer->error = move(gradient);
+        if (layer->type == "ReLU")
         {
-            fill(nn[layer].weightGradient[i].begin(), nn[layer].weightGradient[i].end(), 0.0);
+            for (int out = 0; out < layer->outputSize; out++)
+            {
+                if (layer->output[out] <= 0.f)
+                {
+                    layer->error[out] = 0.f;
+                }
+            }
         }
 
-        fill(nn[layer].biasGradient.begin(), nn[layer].biasGradient.end(), 0.0);
+        gradient.assign(layer->inputSize, 0.f);
+        for (int in = 0; in < layer->inputSize; in++)
+        {
+            for (int out = 0; out < layer->outputSize; out++)
+            {
+                gradient[in] += layer->weights[in][out] * layer->error[out];
+            }
+        }
     }
-}  //----- End of resetGradients
+
+    return gradient;
+}  //----- end of backPropagation
 
 
-void FCNN::accumulateGradient()
-// Algorithm : Accumulate the weight and bias gradients for the layer
+void FCNN::resetGradients()
+// Algorithm : Clear the batch gradients for all dense layers.
 {
     for (auto &layer : nn)
     {
-        // Accumulate the weight gradient
-        for (int i = 0; i < layer.outputSize; i++)  // For each output neuron
+        for (auto &row : layer.weightGradient)
         {
-            for (int j = 0; j < layer.inputSize; j++)  // For each input neuron
+            fill(row.begin(), row.end(), 0.f);
+        }
+
+        fill(layer.biasGradient.begin(), layer.biasGradient.end(), 0.f);
+    }
+}  //----- end of resetGradients
+
+
+void FCNN::accumulateGradients()
+// Algorithm : Add the cached input and preactivation gradient products to the batch.
+{
+    if (nn.empty() || nn.back().error.empty())
+    {
+        throw logic_error("FCNN gradient accumulation requires a backward pass");
+    }
+
+    for (auto &layer : nn)
+    {
+        for (int out = 0; out < layer.outputSize; out++)
+        {
+            for (int in = 0; in < layer.inputSize; in++)
             {
-                layer.weightGradient[j][i] += layer.error[i] * nn[layer.position-1].output[j];
+                layer.weightGradient[in][out] += layer.input[in] * layer.error[out];
             }
 
-            // Accumulate the bias gradient
-            layer.biasGradient[i] += layer.error[i];
+            layer.biasGradient[out] += layer.error[out];
         }
     }
-} //----- end of accumulateGradient
+}  //----- end of accumulateGradients
 
 
-void FCNN::updateWeights(float learning_rate)
-// Algorithm : Update the weights and biases of every layer according to the gradient
+void FCNN::updateWeights(float learningRate)
+// Algorithm : Apply the accumulated gradient to every dense weight and bias.
 {
     for (auto &layer : nn)
     {
-        for (int i = 0; i < layer.outputSize; i++)  // For each neuron of the layer
+        for (int out = 0; out < layer.outputSize; out++)
         {
-            for (int j = 0; j < layer.inputSize; j++)  // For each input
+            for (int in = 0; in < layer.inputSize; in++)
             {
-                layer.weights[j][i] -= learning_rate * layer.weightGradient[j][i];
+                layer.weights[in][out] -= learningRate * layer.weightGradient[in][out];
             }
 
-            // Update the bias
-            layer.biases[i] -= learning_rate * layer.biasGradient[i];
+            layer.biases[out] -= learningRate * layer.biasGradient[out];
         }
     }
-} //----- end of updateWeights
+}  //----- end of updateWeights
 
-//-------------------------------------------------------------- PROTECTED
-void FCNN::initLayer (FullyConnectedLayer &layer)
-// Algorithm : Initialize the weights and biases of the layer
+
+//---------------------------------------------------------------- PRIVATE
+void FCNN::computeLayer(FullyConnectedLayer &layer, const vector<float> &input)
+// Algorithm : Cache the input and apply the affine transform followed by the configured activation.
 {
-    // Resize weights and biases matrices
-    layer.weights.resize(layer.inputSize, vector<float>(layer.outputSize));
-    layer.biases.resize(layer.outputSize, 0.0);  // initialise bias to 0
+    layer.input = input;
+    layer.error.clear();
+    layer.output = layer.biases;
 
-    // initialise weight and bias gradients to 0
-    layer.weightGradient.resize(layer.inputSize, vector<float>(layer.outputSize, 0.0));
-    layer.biasGradient.resize(layer.outputSize, 0.0);
-
-    // initialise weight array with random values
-    uniform_real_distribution<float> dist(-0.1, 0.1);  // Uniform distribution between -0.1 and 0.1;
-    for (int i = 0; i < layer.inputSize; i++)
+    for (int in = 0; in < layer.inputSize; in++)
     {
-        for (int j = 0; j < layer.outputSize; j++)
+        for (int out = 0; out < layer.outputSize; out++)
         {
-            layer.weights[i][j] = dist(gen);
+            layer.output[out] += input[in] * layer.weights[in][out];
         }
     }
 
-    // Resize and initialise error, output
-    layer.error.resize(layer.outputSize, 0.0);
-    layer.output.resize(layer.outputSize, 0.0);
-} //----- end of initLayer
-
-
-void FCNN::computeLayer (FullyConnectedLayer &layer, const vector<float> &in)
-// Algorithm : Compute the output of the layer by matrix multiplication and addition
-{
-    vector<float> input = (layer.position == 0) ? in : nn[layer.position-1].output;
-
-    // Matrix operation to get the output
-    layer.output = multiplyMatrices(input, layer.weights);
-    layer.output = addMatrices(layer.output, layer.biases);
-
-    // activation functions
     if (layer.type == "ReLU")
     {
-        layer.output = ReLU(layer.output);
-    }
-} //----- end of computeLayer
-
-
-void FCNN::backPropagation(const vector<float> &error)
-// Algorithm : Compute the error of the layer by backpropagating the error
-// from the next layer
-{
-    // Set the error of the last layer
-    nn.back().error = error;
-    for(auto it = nn.rbegin() + 1; it != nn.rend(); ++it)
-    {
-        fill(it->error.begin(), it->error.end(), 0.0);
-        for (int i = 0; i < it->outputSize; i++)
+        for (float &value : layer.output)
         {
-            for (int j = 0; j < nn[it->position + 1].outputSize; j++)
-            {
-                it->error[i] += nn[it->position+1].weights[i][j] * nn[it->position+1].error[j];
-            }
-
-            if (it->type == "ReLU")
-            {
-                // Derivative of ReLU: 1 if x > 0, 0 otherwise
-                it->error[i] *= (it->output[i] > 0 ? 1.0 : 0.0);
-            }
+            value = max(0.f, value);
         }
     }
-} //----- end of backPropagation
-
-
-inline vector<float> FCNN::ReLU(const vector<float> &input)
-// Algorithm : Apply the ReLU activation function to the input
-{
-    vector<float> output = input;
-    for (float &x : output)
-    {
-        if (x < 0) x = 0;
-    }
-
-    return output;
-} //----- end of ReLU
-
-
-inline vector<float> FCNN::multiplyMatrices(const vector<float> &row, const Matrix<float> &mat)
-// Algorithm : Multiply a row vector by a matrix
-{
-    const int resM = mat[0].size();
-    vector<float> result(resM, 0.0);
-
-    // Optimized multiplication
-    for (int i = 0; i < row.size(); i++)
-    {
-        const double row_val = row[i];
-        for (int j = 0; j < resM; j++)
-        {
-            result[j] += row_val * mat[i][j];
-        }
-    }
-
-    return result;
-} //----- end of multiplyMatrix
-
-
-inline vector<float> FCNN::addMatrices(const vector<float> &c1, const vector<float> &c2)
-// Algorithm : Add two vectors element-wise
-{
-    const int resM = c2.size();
-    vector<float> result(resM, 0.0);
-
-    for (int i = 0; i < resM; i++)
-    {
-        result[i] = c1[i] + c2[i];
-    }
-
-    return result;
-} //----- end of addMat
+}  //----- end of computeLayer
