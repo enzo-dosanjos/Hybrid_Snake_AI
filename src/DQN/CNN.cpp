@@ -150,19 +150,7 @@ FeatureTensor CNN::forwardPropagation(const BoardTensor &input)
     }
 
     auto [height, width] = spatialSize(input);
-    for (const auto &layer : nn)
-    {
-        long long paddedHeight = height + 2LL*layer.padding;
-        long long paddedWidth = width + 2LL*layer.padding;
-        if (paddedHeight < layer.kernelSize || paddedWidth < layer.kernelSize ||
-            paddedHeight > numeric_limits<int>::max() || paddedWidth > numeric_limits<int>::max())
-        {
-            throw invalid_argument("Invalid padded dimensions for convolution");
-        }
-
-        height = (paddedHeight - layer.kernelSize) / layer.stride + 1;
-        width = (paddedWidth - layer.kernelSize) / layer.stride + 1;
-    }
+    validateSpatialSize(height, width);
 
     const FeatureTensor *activation = &input;
     for (auto &layer : nn)
@@ -395,6 +383,25 @@ void CNN::updateWeights(float learningRate)
 
 
 //---------------------------------------------------------------- PRIVATE
+void CNN::validateSpatialSize(int height, int width) const
+// Algorithm : Check the padded size at each layer before allocating activations.
+{
+    for (const auto &layer : nn)
+    {
+        long long paddedHeight = height + 2LL*layer.padding;
+        long long paddedWidth = width + 2LL*layer.padding;
+        if (paddedHeight < layer.kernelSize || paddedWidth < layer.kernelSize ||
+            paddedHeight > numeric_limits<int>::max() || paddedWidth > numeric_limits<int>::max())
+        {
+            throw invalid_argument("Invalid padded dimensions for convolution");
+        }
+
+        height = (paddedHeight - layer.kernelSize) / layer.stride + 1;
+        width = (paddedWidth - layer.kernelSize) / layer.stride + 1;
+    }
+}  //----- end of validateSpatialSize
+
+
 FeatureTensor CNN::padInput(const FeatureTensor &input, int padding)
 // Algorithm : Copy each channel into a zero-filled matrix with a border of the requested width.
 {

@@ -223,9 +223,16 @@ package "DQNPackage" {
     end note
 
     class ResultValidation {
-        + validate(agent : Agent&, validationSet : vector<GameConfig>) : ValidationResult
+        + validate(agent : Agent&, validationSet : vector<ValidationMatch>) : ValidationResult
         + calculateScore(result : ValidationResult) : float
     }
+
+    note bottom of ResultValidation
+        Callers supply the board, origins, evaluated seat and opponents.
+        All agents use evaluation mode. Score is the fraction of matches won.
+        Mean survival counts living turns through the evaluated player's
+        death or the end of the game.
+    end note
 }
 
 package "AgentPackage" {

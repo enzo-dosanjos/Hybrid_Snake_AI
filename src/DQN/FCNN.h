@@ -86,6 +86,8 @@ class FCNN : public NeuralNetwork {
 
 //---------------------------------------------------------------- PRIVATE
     private:
+        friend class ModelPersistence;
+
         static void computeLayer(FullyConnectedLayer &layer, const std::vector<float> &input);
 
         std::vector<FullyConnectedLayer> nn;

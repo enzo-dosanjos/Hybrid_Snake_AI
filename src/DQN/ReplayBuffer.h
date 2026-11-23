@@ -59,6 +59,8 @@ class ReplayBuffer {
 
 //---------------------------------------------------------------- PRIVATE
     private:
+        friend class ModelPersistence;
+
         std::deque<Transition> buffer;
         int capacity;
         std::mt19937 gen;

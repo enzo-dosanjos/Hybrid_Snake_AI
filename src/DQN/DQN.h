@@ -59,6 +59,8 @@ class DQN {
 
 //---------------------------------------------------------------- PRIVATE
     private:
+        friend class ModelPersistence;
+
         static CNN makeCNN(const ModelConfig &config, const std::mt19937 &gen);
         static FCNN makeFCNN(const ModelConfig &config, const std::mt19937 &gen);
         static std::array<float, 4> evaluate(FCNN &network, const FeatureTensor &cnnOutput,
@@ -72,11 +74,8 @@ class DQN {
         CNN targetCNN;
         FCNN targetFCNN;
         ReplayBuffer replayBuffer;
-        FeatureSelection featureSelection;
+        ModelConfig config;
         float epsilon;
-        float minEpsilon;
-        float epsilonDecay;
-        float gamma;
         std::mt19937 gen;
 };
 

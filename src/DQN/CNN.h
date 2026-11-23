@@ -97,6 +97,9 @@ class CNN : public NeuralNetwork {
 
 //---------------------------------------------------------------- PRIVATE
     private:
+        friend class ModelPersistence;
+
+        void validateSpatialSize(int height, int width) const;
         static FeatureTensor padInput(const FeatureTensor &input, int padding);
         static void convolution(ConvolutionalLayer &layer, const FeatureTensor &input);
 

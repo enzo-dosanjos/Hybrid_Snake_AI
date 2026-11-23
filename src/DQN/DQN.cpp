@@ -23,12 +23,10 @@ using namespace std;
 DQN::DQN(const ModelConfig &config, const mt19937 &p_gen)
     : cnn(makeCNN(config, p_gen)), fcnn(makeFCNN(config, p_gen)),
       targetCNN(cnn), targetFCNN(fcnn), replayBuffer(config.replayCapacity, p_gen),
-      featureSelection(config.features),
-      epsilon(config.epsilon), minEpsilon(config.minEpsilon), epsilonDecay(config.epsilonDecay),
-      gamma(config.gamma), gen(p_gen)
+      config(config), epsilon(config.epsilon), gen(p_gen)
 // Algorithm : Configure the online networks and copy their initial parameters into the targets.
 {
-    for (float value : {epsilon, minEpsilon, epsilonDecay, gamma})
+    for (float value : {epsilon, config.minEpsilon, config.epsilonDecay, config.gamma})
     {
         if (!(value >= 0.f && value <= 1.f))
         {
@@ -158,7 +156,7 @@ void DQN::updateTargetNetworks()
 const FeatureSelection &DQN::getFeatureSelection() const
 // Algorithm : Return the feature selection copied at model construction.
 {
-    return featureSelection;
+    return config.features;
 }  //----- end of getFeatureSelection
 
 
@@ -245,15 +243,15 @@ float DQN::bellmanTarget(const Transition &transition)
     }
 
     auto values = evaluate(targetFCNN, targetCNN.forwardPropagation(next.board), next.extraFeatures);
-    return transition.reward + gamma * values[bestLegalIndex(values, next.legalActions)];
+    return transition.reward + config.gamma * values[bestLegalIndex(values, next.legalActions)];
 }  //----- end of bellmanTarget
 
 
 void DQN::decayEpsilon()
 // Algorithm : Reduce the exploration rate while respecting its configured floor.
 {
-    if (epsilon > minEpsilon)
+    if (epsilon > config.minEpsilon)
     {
-        epsilon = max(minEpsilon, epsilon * epsilonDecay);
+        epsilon = max(config.minEpsilon, epsilon * config.epsilonDecay);
     }
 }  //----- end of decayEpsilon
