@@ -1,5 +1,5 @@
 /*************************************************************************
-HybridAgent - todo
+HybridAgent - Combines Minimax and learned action scores
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -9,38 +9,126 @@ HybridAgent - todo
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
 #include <algorithm>
-#include <iostream>
+#include <array>
+#include <limits>
+#include <optional>
+#include <stdexcept>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
-#include "../include/HybridAgent.h"
+#include "HybridAgent.h"
+#include "../GameEngine/DecisionEncoding.h"
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-string HybridAgent::selectAction(
-    const vector<float> &boardState,
-    const vector<float> &extraFeatures,
-    const Players &playerState,
-    const deque<string> &last5Moves,
-    int turn
-) {
-    // --- Select action using DQN ---
-    vector<float> qValues = dqn.forwardPropagation(boardState, extraFeatures);
-
-    // --- Select action using Minimax ---
-    unordered_map<string, float> mmScores = minimax.calculateMoveScores(boardState);
-
-    // Combine scores with lambda weighting
-    map<string, float> combined;
-    for (const auto &[move, score] : mmScores) {
-        int qIdx = distance(ACTIONS.begin(), find_if(ACTIONS.begin(), ACTIONS.end(),
-            [&move](const pair<int, string> &p) { return p.second == move; }));
-        combined[move] = (1 - lambda) * score + lambda * qValues[qIdx];
+optional<Action> HybridAgent::selectAction(const GameEngine &engine)
+// Algorithm : Explore through the learner or maximize a weighted sum of rescaled legal scores.
+{
+    int player = engine.getState().currentPlayer;
+    ActionMask mask = engine.getActionMask(player);
+    if (engine.isTerminalFor(player) || mask.none())
+    {
+        return nullopt;
     }
 
-    return max_element(combined.begin(), combined.end(),
-        [](const pair<string, float> &a, const pair<string, float> &b) {
-            return a.second < b.second;
+    if (explore)
+    {
+        auto action = dqn.sampleExplorationAction(mask);
+        if (action)
+        {
+            return action;
+        }
+    }
+
+    // Use the original ranking at the endpoints, where only one scorer contributes.
+    if (lambda == 1.f)
+    {
+        return dqn.selectAction(encodeDecision(engine, player, dqn.getFeatureSelection()), false);
+    }
+
+    auto searchScores = minimax.calculateMoveScores(engine);
+    if (lambda == 0.f)
+    {
+        return max_element(searchScores.begin(), searchScores.end(), [](const auto &left, const auto &right)
+        {
+            return left.second < right.second;
         })->first;
-}  // ----- End of selectAction
+    }
+
+    array<float, 4> searchValues{};
+    for (const auto &[action, score] : searchScores)
+    {
+        searchValues[static_cast<size_t>(action)] = score;
+    }
+
+    auto qValues = dqn.forwardPropagation(encodeDecision(engine, player, dqn.getFeatureSelection()));
+    auto normalizedSearch = normalizeLegalScores(searchValues, mask);
+    auto normalizedQ = normalizeLegalScores(qValues, mask);
+
+    optional<Action> best;
+    double bestScore = 0.0;
+    for (size_t action = 0; action < mask.size(); action++)
+    {
+        if (!mask[action])
+        {
+            continue;
+        }
+
+        double combined = (1.0 - lambda) * normalizedSearch[action] + lambda * normalizedQ[action];
+        if (!best || combined > bestScore)
+        {
+            best = static_cast<Action>(action);
+            bestScore = combined;
+        }
+    }
+
+    return best;
+}  //----- end of selectAction
+
+
+HybridAgent::HybridAgent(DQN &p_dqn, const MinimaxParams &params, float p_lambda, bool p_explore)
+    : dqn(p_dqn), minimax(params), lambda(p_lambda), explore(p_explore)
+// Algorithm : Keep the shared learner, configure search and validate the neural weighting.
+{
+    if (!(lambda >= 0.f && lambda <= 1.f))
+    {
+        throw invalid_argument("HybridAgent lambda must be in [0, 1]");
+    }
+}  //----- end of HybridAgent
+
+
+//---------------------------------------------------------------- PRIVATE
+array<double, 4> HybridAgent::normalizeLegalScores(const array<float, 4> &scores, const ActionMask &mask)
+// Algorithm : Map the legal minimum and maximum to zero and one, leaving equal scores at zero.
+{
+    float minimum = numeric_limits<float>::infinity();
+    float maximum = -minimum;
+
+    for (size_t action = 0; action < mask.size(); action++)
+    {
+        if (mask[action])
+        {
+            minimum = min(minimum, scores[action]);
+            maximum = max(maximum, scores[action]);
+        }
+    }
+
+    array<double, 4> normalized{};
+    if (minimum == maximum)
+    {
+        return normalized;
+    }
+
+    // Subtract in double so the full range of finite float scores fits.
+    double range = static_cast<double>(maximum) - minimum;
+    for (size_t action = 0; action < mask.size(); action++)
+    {
+        if (mask[action])
+        {
+            normalized[action] = (static_cast<double>(scores[action]) - minimum) / range;
+        }
+    }
+
+    return normalized;
+}  //----- end of normalizeLegalScores

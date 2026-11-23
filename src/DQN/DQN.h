@@ -33,6 +33,9 @@ class DQN {
         std::optional<Action> selectAction(const EncodedState &state, bool explore);
         // Contract : Return no action for an empty mask, otherwise an epsilon-greedy legal action.
 
+        std::optional<Action> sampleExplorationAction(const ActionMask &legalActions);
+        // Contract : Sample a uniform legal action with probability epsilon; otherwise return no action.
+
         std::array<float, 4> forwardPropagation(const EncodedState &state);
         // Contract : Return the four raw online Q-values in Action order.
 
@@ -45,6 +48,10 @@ class DQN {
 
         void updateTargetNetworks();
         // Contract : Refresh both target networks with the current online parameters.
+
+//--------------------------------------------------------- SETTERS/GETTERS
+        const FeatureSelection &getFeatureSelection() const;
+        // Usage : Encode decisions using the feature groups configured for this learner.
 
 //---------------------------------------------- Constructors - destructor
         DQN(const ModelConfig &config, const std::mt19937 &p_gen);
@@ -65,6 +72,7 @@ class DQN {
         CNN targetCNN;
         FCNN targetFCNN;
         ReplayBuffer replayBuffer;
+        FeatureSelection featureSelection;
         float epsilon;
         float minEpsilon;
         float epsilonDecay;

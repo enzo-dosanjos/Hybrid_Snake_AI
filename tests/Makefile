@@ -6,6 +6,7 @@ TEST_ENGINE = src/GameEngine/GameEngine.cpp src/GameEngine/PlayerSelector.cpp
 TEST_ENCODING = src/GameEngine/Observation.cpp src/GameEngine/StateAnalyzer.cpp
 TEST_NETWORKS = src/DQN/CNN.cpp src/DQN/FCNN.cpp
 TEST_DQN = $(TEST_ENGINE) $(TEST_ENCODING) $(TEST_NETWORKS) src/DQN/DQN.cpp src/DQN/ReplayBuffer.cpp
+TEST_MINIMAX = src/Minimax/Minimax.cpp src/Minimax/SpaceRiskAnalyzer.cpp
 
 .PHONY: test
 
@@ -27,12 +28,14 @@ build/tests/game-loop: tests/GameLoopTests.cpp | AI
 build/tests/observation: tests/ObservationTests.cpp $(TEST_ENGINE) src/GameEngine/Observation.cpp
 build/tests/state-analyzer: tests/StateAnalyzerTests.cpp $(TEST_ENGINE) src/GameEngine/StateAnalyzer.cpp
 build/tests/space-risk-analyzer: tests/SpaceRiskAnalyzerTests.cpp $(TEST_ENGINE) src/Minimax/SpaceRiskAnalyzer.cpp
-build/tests/minimax: tests/MinimaxTests.cpp $(TEST_ENGINE) src/Agent/MinimaxAgent.cpp src/Minimax/Minimax.cpp src/Minimax/SpaceRiskAnalyzer.cpp
+build/tests/minimax: tests/MinimaxTests.cpp $(TEST_ENGINE) src/Agent/MinimaxAgent.cpp $(TEST_MINIMAX)
 build/tests/cnn: tests/CNNTests.cpp src/DQN/CNN.cpp
 build/tests/fcnn: tests/FCNNTests.cpp src/DQN/FCNN.cpp
 build/tests/replay-buffer: tests/ReplayBufferTests.cpp src/DQN/ReplayBuffer.cpp
 build/tests/reward: tests/RewardTests.cpp $(TEST_ENGINE) src/DQN/Reward.cpp
 build/tests/dqn: tests/DQNTests.cpp $(TEST_DQN)
+build/tests/dqn-agent: tests/DQNAgentTests.cpp $(TEST_DQN) src/Agent/DQNAgent.cpp
+build/tests/hybrid-agent: tests/HybridAgentTests.cpp $(TEST_DQN) $(TEST_MINIMAX) src/Agent/HybridAgent.cpp
 build/tests/persistence: tests/PersistenceTests.cpp $(TEST_DQN) src/DQN/ModelPersistence.cpp
 
 build/tests/%: tests/TestMain.cpp $(TEST_HEADERS) | build/tests

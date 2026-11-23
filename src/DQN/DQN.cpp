@@ -23,6 +23,7 @@ using namespace std;
 DQN::DQN(const ModelConfig &config, const mt19937 &p_gen)
     : cnn(makeCNN(config, p_gen)), fcnn(makeFCNN(config, p_gen)),
       targetCNN(cnn), targetFCNN(fcnn), replayBuffer(config.replayCapacity, p_gen),
+      featureSelection(config.features),
       epsilon(config.epsilon), minEpsilon(config.minEpsilon), epsilonDecay(config.epsilonDecay),
       gamma(config.gamma), gen(p_gen)
 // Algorithm : Configure the online networks and copy their initial parameters into the targets.
@@ -45,25 +46,40 @@ optional<Action> DQN::selectAction(const EncodedState &state, bool explore)
         return nullopt;
     }
 
-    if (explore && uniform_real_distribution<float>(0.f, 1.f)(gen) < epsilon)
+    if (explore)
     {
-        array<Action, 4> legalActions;
-        int count = 0;
-
-        for (size_t index = 0; index < state.legalActions.size(); index++)
+        auto action = sampleExplorationAction(state.legalActions);
+        if (action)
         {
-            if (state.legalActions[index])
-            {
-                legalActions[count] = static_cast<Action>(index);
-                count++;
-            }
+            return action;
         }
-
-        return legalActions[uniform_int_distribution<int>(0, count - 1)(gen)];
     }
 
     return static_cast<Action>(bestLegalIndex(forwardPropagation(state), state.legalActions));
 }  //----- end of selectAction
+
+
+optional<Action> DQN::sampleExplorationAction(const ActionMask &legalActions)
+// Algorithm : Use the current epsilon to decide whether to sample uniformly from the supplied mask.
+{
+    if (legalActions.none() || uniform_real_distribution<float>(0.f, 1.f)(gen) >= epsilon)
+    {
+        return nullopt;
+    }
+
+    array<Action, 4> actions;
+    int count = 0;
+    for (size_t index = 0; index < legalActions.size(); index++)
+    {
+        if (legalActions[index])
+        {
+            actions[count] = static_cast<Action>(index);
+            count++;
+        }
+    }
+
+    return actions[uniform_int_distribution<int>(0, count - 1)(gen)];
+}  //----- end of sampleExplorationAction
 
 
 array<float, 4> DQN::forwardPropagation(const EncodedState &state)
@@ -136,6 +152,14 @@ void DQN::updateTargetNetworks()
     targetCNN.copyWeights(cnn);
     targetFCNN.copyWeights(fcnn);
 }  //----- end of updateTargetNetworks
+
+
+//--------------------------------------------------------- SETTERS/GETTERS
+const FeatureSelection &DQN::getFeatureSelection() const
+// Algorithm : Return the feature selection copied at model construction.
+{
+    return featureSelection;
+}  //----- end of getFeatureSelection
 
 
 //---------------------------------------------------------------- PRIVATE

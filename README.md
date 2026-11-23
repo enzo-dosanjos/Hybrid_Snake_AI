@@ -100,9 +100,14 @@ flowchart TD
 - **Observation and StateAnalyzer** transform a state into board channels and
   ordered numerical features. `EncodedState` groups these inputs with the legal
   action mask; `Transition` stores a learning experience.
-- **Agents** share a `selectAction` interface. `DQNAgent` uses learned Q-values,
-  `MinimaxAgent` uses search scores, and `HybridAgent` combines their normalized
-  scores over legal actions using `(1 - lambda) * minimaxScore + lambda * qValue`.
+- **Agents** share a `selectAction` interface for the scheduled player.
+  `DQNAgent` uses learned Q-values, and `MinimaxAgent` uses search scores.
+  `HybridAgent` scales each scorer independently to `[0, 1]` using its legal
+  minimum and maximum, maps constant scores to zero, and maximizes
+  `(1 - lambda) * minimaxScore + lambda * qValue`. Score ties follow Action enum
+  order. Both neural agents borrow the training learner and use its feature
+  selection. With exploration enabled, the learner's current epsilon is the
+  probability of choosing a uniformly random legal action.
 - **DQN** owns online and target networks plus its replay buffer. CNN features
   pass through global average pooling and are combined with extra features before
   the FCNN produces four action values.

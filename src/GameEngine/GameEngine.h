@@ -15,6 +15,11 @@ GameEngine - Handles the game logic and operations. Owns the authoritative
 // search.
 //------------------------------------------------------------------------
 
+//--------------------------------------------------------- System Include
+#include <cstddef>
+#include <stdexcept>
+#include <vector>
+
 //-------------------------------------------------------- Used interfaces
 #include "../Structs.h"
 #include "../Utils.h"
@@ -150,9 +155,9 @@ class GameEngine
             validateGameConfig(state.config);
 
             if (state.round < 0 || state.currentPlayer < 1 || state.currentPlayer > state.config.N ||
-                state.players.size() != static_cast<size_t>(state.config.N))
+                state.players.size() != static_cast<std::size_t>(state.config.N))
             {
-                throw invalid_argument("Invalid game snapshot");
+                throw std::invalid_argument("Invalid game snapshot");
             }
 
             for (int player = 1; player <= state.config.N; player++)
@@ -161,14 +166,14 @@ class GameEngine
 
                 if (snake.empty())
                 {
-                    throw invalid_argument("A player must retain at least one snake segment");
+                    throw std::invalid_argument("A player must retain at least one snake segment");
                 }
 
                 for (const Coord &cell : snake)
                 {
                     if (!isInbound(cell, state.config))
                     {
-                        throw invalid_argument("Snake segment outside the board");
+                        throw std::invalid_argument("Snake segment outside the board");
                     }
                 }
 
@@ -176,7 +181,7 @@ class GameEngine
 
                 if (history.size() > ACTION_HISTORY_SIZE)
                 {
-                    throw invalid_argument("Action history exceeds its fixed size");
+                    throw std::invalid_argument("Action history exceeds its fixed size");
                 }
             }
 

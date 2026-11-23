@@ -80,7 +80,7 @@ vector<string> checkpointSuites(const string &checkpoint)
 
     if (checkpoint == "3")
     {
-        return {"cnn", "fcnn", "replay-buffer", "reward", "dqn", "persistence"};
+        return {"cnn", "fcnn", "replay-buffer", "reward", "dqn", "dqn-agent", "hybrid-agent", "persistence"};
     }
 
     throw invalid_argument("Checkpoint must be 1, 2 or 3");
@@ -92,7 +92,7 @@ int main(int argc, char **argv)
 {
     vector<string> suites = {
         "game-engine", "input-handler", "game-loop", "observation", "state-analyzer", "space-risk-analyzer", "minimax",
-        "cnn", "fcnn", "replay-buffer", "reward", "dqn", "persistence"
+        "cnn", "fcnn", "replay-buffer", "reward", "dqn", "dqn-agent", "hybrid-agent", "persistence"
     };
     vector<string> selected = suites;
 
