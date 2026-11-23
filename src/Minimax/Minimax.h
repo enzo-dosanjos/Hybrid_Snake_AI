@@ -1,5 +1,5 @@
 /*************************************************************************
-Minimax - Implementation of a minimax algorithm with alpha-beta prunning
+Minimax - Scores legal moves with alpha-beta search
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -10,29 +10,20 @@ Minimax - Implementation of a minimax algorithm with alpha-beta prunning
 
 //------------------------------------------------------------------------
 // Role of the <Minimax> module
-// Implementation of a minimax algorithm with alpha-beta prunning
-// that uses a reward function to evaluate the game state.
+// Search independent engine successors from the current player's perspective.
+// The root player maximizes and every opponent minimizes the same score.
 //------------------------------------------------------------------------
 
+//--------------------------------------------------------- System Include
+#include <map>
+
 //-------------------------------------------------------- Used interfaces
-#include "GameEngine.h"
-#include "../include/Structs.h"
-#include "../include/SpaceRiskAnalyzer.h"
+#include "../GameEngine/GameEngine.h"
+#include "SpaceRiskAnalyzer.h"
 
 //------------------------------------------------------------------ Types
-// used to find the best optimised parameters
-namespace std {
-    template<> struct hash<GameConfig> {
-        size_t operator()(const GameConfig& c) const {
-            return hash<int>()(c.W) ^ hash<int>()(c.H) ^ hash<int>()(c.M);
-        }
-    };
-}
-
-
-// Reward configuration
 struct Rewards {
-    double selfSpace = 2.72685;  // default values in case the file cannot be read
+    double selfSpace = 2.72685;
     double oppSpace = 0.36796;
 
     double selfBlockRisk = -11.63637;
@@ -41,83 +32,36 @@ struct Rewards {
     double selfHeatRisk = -0.39336;
     double oppHeatRisk = -2.62494;
 
-    double snakeLength = 1.66086;  // reward increase the more the player survives
+    double snakeLength = 1.66086;
 };
 
 
 struct MinimaxParams {
     Rewards rewards;
+    // Count scheduled slots, including the root action, dead slots and forced deaths.
     int depth = 8;
 };
 
 
 //----------------------------------------------------------------- PUBLIC
-class Minimax
-{
+class Minimax {
 //--------------------------------------------------------- Public Methods
     public:
-        std::unordered_map<std::string, float> calculateMoveScores(
-        	std::vector<float> &boardState,
-            Players &playerState,
-            int turn
-        );
-        // Usage :
-        //
-        // Contract :
-        //
+        std::map<Action, float> calculateMoveScores(const GameEngine &engine) const;
+        // Contract : Return one exact search score per legal root action, or an empty map when no decision is possible.
 
-        Minimax(
-            GameEngine p_gameEngine,
-            int spaceRiskAnalyzerLookahead = 5,
-            float spaceRiskAnalyzerDecay = 0.7
-        ) : gameEngine(p_gameEngine),
-            analyzer(p_gameEngine.getConfig(), spaceRiskAnalyzerLookahead, spaceRiskAnalyzerDecay)
-        {
-            #ifdef MAP
-                cout << "Calling the constructor of Minimax" << endl;
-            #endif
-        }
+//---------------------------------------------- Constructors - destructor
+        explicit Minimax(const MinimaxParams &p_params, int lookahead = 5, float decay = 0.7f);
+        // Contract : Require positive depth and finite reward weights.
 
-
-    protected:
-    	std::pair<std::vector<float>, Players> simulateMove(
-        	const std::string &move,
-            const std::vector<float> &boardState,
-            const Players &playerState,
-            int turn,
-            int playerNum
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        float evaluateState(
-            const Players &playerState,
-            int currentPlayer
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-        float minimax(
-            const std::vector<float> &boardState,
-            Players playerState,
-            int depth,
-            float alpha,
-            float beta,
-            int currentPlayer,
-            int turn
-        );
-        // Usage :
-        //
-        // Contract :
-        //
-
-
+//---------------------------------------------------------------- PRIVATE
     private:
-        GameEngine gameEngine;
+        float evaluateState(const GameState &state, int rootPlayer) const;
+        // Contract : Score the root's spatial metrics and length against the spatial metrics of living opponents.
+
+        float minimax(const GameEngine &engine, int depth, float alpha, float beta, int rootPlayer) const;
+        // Contract : Search the remaining scheduled slots using the supplied alpha-beta window.
+
         MinimaxParams params;
         SpaceRiskAnalyzer analyzer;
 };

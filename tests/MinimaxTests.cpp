@@ -9,6 +9,7 @@ MinimaxTests - Legal decisions, exhaustive outcomes and complete games
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 using namespace std;
@@ -55,6 +56,76 @@ int solve(GameEngine engine, int root, int remaining)
 }  //----- end of solve
 
 
+float referenceScore(GameEngine engine, int root, int remaining, const Rewards &weights)
+// Algorithm : Compute the fixed-depth value by enumerating every legal branch and evaluating each leaf independently.
+{
+    if (engine.isTerminalFor(root))
+    {
+        // Use infinity as a reference marker so the test need not share the search's terminal score constant.
+        float terminal = numeric_limits<float>::infinity();
+        return engine.isAlive(root) ? terminal : -terminal;
+    }
+
+    if (remaining == 0)
+    {
+        SpaceRiskAnalyzer analyzer;
+        double ownScore = weights.snakeLength * engine.getPlayers().at(root).snake.size();
+        double opponentScore = 0;
+
+        // Analyze each living perspective separately using the analyzer's complete snapshot result.
+        for (const auto &[player, data] : engine.getPlayers())
+        {
+            if (!data.playerInfo.alive)
+            {
+                continue;
+            }
+
+            auto [areas, heatmap] = analyzer.analyzeState(engine.getState(), player);
+            float heat = analyzer.calculateDirectionalRisk(heatmap, data.snake.front());
+
+            if (player == root)
+            {
+                ownScore += weights.selfSpace * areas.space[player] + weights.selfBlockRisk * areas.blockRisk[player]
+                          + weights.selfHeatRisk * heat;
+            }
+            else
+            {
+                opponentScore += weights.oppSpace * areas.space[player] + weights.oppBlockRisk * areas.blockRisk[player]
+                               + weights.oppHeatRisk * heat;
+            }
+        }
+
+        return ownScore - opponentScore;
+    }
+
+    int player = engine.getState().currentPlayer;
+    ActionMask mask = engine.getActionMask(player);
+
+    if (mask.none())
+    {
+        if (engine.isAlive(player))
+        {
+            engine.playerDied(player);
+        }
+
+        engine.finishTurn();
+        return referenceScore(engine, root, remaining - 1, weights);
+    }
+
+    vector<float> scores;
+
+    for (size_t action = 0; action < mask.size(); action++)
+    {
+        if (mask[action])
+        {
+            scores.push_back(referenceScore(engine.successor(static_cast<Action>(action)), root, remaining - 1, weights));
+        }
+    }
+
+    return player == root ? *max_element(scores.begin(), scores.end()) : *min_element(scores.begin(), scores.end());
+}  //----- end of referenceScore
+
+
 void testOnlyLegalMove()
 // Algorithm : Tests forced selection and state preservation using a position with exactly one legal move.
 {
@@ -80,7 +151,89 @@ void testNoAction()
     GameEngine finished({3, 3, 1, 2, 1}, {{0, 0}, {0, 0}, {2, 2}});
     finished.playerDied(2);
     check(!agent.selectAction(finished), "Terminal game selected an action");
+
+    GameEngine deadSlot({3, 3, 1, 3, 1}, {{0, 0}, {0, 0}, {2, 2}, {0, 2}});
+    deadSlot.playerDied(1);
+    auto before = deadSlot.getState();
+    check(!agent.selectAction(deadSlot), "Dead scheduled player selected an action");
+    checkState(deadSlot.getState(), before);
 }  //----- end of testNoAction
+
+
+void testExactMoveScores()
+// Algorithm : Compare every legal score with unpruned search across a growth boundary and a dead player's slot.
+{
+    GameEngine engine({5, 4, 2, 4, 1}, {{0, 0}, {0, 0}, {2, 0}, {4, 0}, {2, 2}});
+    engine.updateStep(Action::Down);
+    engine.playerDied(2);
+    engine.finishTurn();
+    engine.updateStep(Action::Down);
+    auto before = engine.getState();
+    int root = before.currentPlayer;
+    ActionMask mask = engine.getActionMask(root);
+
+    for (int depth : {1, 3, 5, 6})
+    {
+        MinimaxParams params;
+        params.depth = depth;
+        Minimax search(params);
+        auto scores = search.calculateMoveScores(engine);
+        checkState(engine.getState(), before);
+        check(scores.size() == mask.count(), "Search must score exactly the legal actions");
+
+        for (const auto &[action, score] : scores)
+        {
+            check(mask[static_cast<size_t>(action)], "Search scored an illegal action");
+            float expected = referenceScore(engine.successor(action), root, depth - 1, params.rewards);
+
+            if (isinf(expected))
+            {
+                check(isfinite(score) && copysign(1.f, score) == copysign(1.f, expected),
+                      "Terminal action must have a finite score with the correct sign");
+            }
+            else
+            {
+                checkNear(score, expected, "Inexact root action score at depth " + to_string(depth)
+                                           + ", action " + to_string(static_cast<int>(action)));
+            }
+        }
+    }
+}  //----- end of testExactMoveScores
+
+
+void testTerminalDominance()
+// Algorithm : Compare forced wins and losses with continuing branches under extreme heuristic weights.
+{
+    GameEngine engine({3, 2, 1, 3, 1}, {{0, 0}, {0, 0}, {2, 0}, {2, 1}});
+    engine.playerDied(3);
+    auto before = engine.getState();
+    MinimaxParams params;
+    params.depth = 2;
+    params.rewards.snakeLength = numeric_limits<double>::max();
+    auto scores = Minimax(params).calculateMoveScores(engine);
+    float win = scores.at(Action::Right);
+    float continuing = scores.at(Action::Down);
+
+    check(isfinite(win) && isfinite(continuing) && win > continuing && continuing > 0.f,
+          "Forced win must dominate even a very large positive heuristic");
+    MinimaxAgent agent(params);
+    Agent &decisionAgent = agent;
+    check(decisionAgent.selectAction(engine) == Action::Right, "Agent ignored the guaranteed win");
+    checkState(engine.getState(), before);
+
+    GameEngine losing({4, 2, 1, 3, 1}, {{0, 0}, {1, 0}, {3, 1}, {3, 0}});
+    losing.playerDied(3);
+    auto beforeLoss = losing.getState();
+    params.depth = 4;
+    params.rewards.snakeLength = -numeric_limits<double>::max();
+    scores = Minimax(params).calculateMoveScores(losing);
+    float loss = scores.at(Action::Right);
+    continuing = scores.at(Action::Left);
+
+    check(isfinite(loss) && isfinite(continuing) && loss < continuing && continuing < 0.f,
+          "Forced loss must score below even a very large negative heuristic");
+    checkState(losing.getState(), beforeLoss);
+}  //----- end of testTerminalDominance
 
 
 void testExhaustiveSmallBoards()
@@ -171,6 +324,8 @@ vector<TestCase> getTests()
     return {
         {"only_legal_move", testOnlyLegalMove},
         {"no_action", testNoAction},
+        {"exact_move_scores", testExactMoveScores},
+        {"terminal_dominance", testTerminalDominance},
         {"exhaustive_small_boards", testExhaustiveSmallBoards},
         {"complete_games", testCompleteGames}
     };

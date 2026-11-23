@@ -1,5 +1,5 @@
 /*************************************************************************
-Minimax - Implementation of a minimax algorithm with alpha-beta prunning
+Minimax - Scores legal moves with alpha-beta search
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
@@ -8,225 +8,170 @@ Minimax - Implementation of a minimax algorithm with alpha-beta prunning
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <limits>
 #include <algorithm>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
-#include "../include/Minimax.h"
+#include "Minimax.h"
+
+//-------------------------------------------------------------- Constants
+namespace {
+    // Leave room for the heuristic range and for subtracting any two scores.
+    constexpr float TERMINAL_SCORE = numeric_limits<float>::max() / 4.f;
+    constexpr long double HEURISTIC_LIMIT = TERMINAL_SCORE / 2.f;
+    constexpr float INFINITY_SCORE = numeric_limits<float>::infinity();
+}
 
 //----------------------------------------------------------------- PUBLIC
 //--------------------------------------------------------- Public Methods
-unordered_map<string, float> Minimax::calculateMoveScores(vector<float> &boardState,
-                                                          Players &playerState, int turn)
-// Algorithm : Main method to calculate the move scores and return the best move.
-// It uses the minimax algorithm with alpha-beta prunning to reduce the search space.
+map<Action, float> Minimax::calculateMoveScores(const GameEngine &engine) const
+// Algorithm : Score every legal engine successor with a fresh full window so each result is exact.
 {
-    unordered_map<string, float> moveScores;
+    int rootPlayer = engine.getState().currentPlayer;
+    map<Action, float> scores;
 
-    // Get valid moves for the current player
-    vector<string> validMoves = helper.getValidMoves(boardState, playerState, config.P);  // todo: modify
+    if (engine.isTerminalFor(rootPlayer))
+    {
+        return scores;
+    }
 
-    // Initialize alpha and beta values
-    float alpha = -numeric_limits<float>::infinity();
-    float beta = numeric_limits<float>::infinity();
-    float bestValue = -numeric_limits<float>::infinity();
+    ActionMask mask = engine.getActionMask(rootPlayer);
 
-    for (const auto &move : validMoves) {
-        // Simulate the move
-        auto simulatedState = simulateMove(move, boardState, playerState, turn, config.P);
-        int nextPlayer = helper.getNextPlayer(config.P, simulatedState.second);  // todo: modify
-
-        float eval;
-        if (nextPlayer == -1)
+    for (size_t action = 0; action < mask.size(); action++)
+    {
+        if (mask[action])
         {
-            // if a terminal state is reached, evaluate the state
-            eval = evaluateState(simulatedState.second, config.P);
+            Action move = static_cast<Action>(action);
+            GameEngine next = engine.successor(move);
+            scores.emplace(move, minimax(next, params.depth - 1, -INFINITY_SCORE, INFINITY_SCORE, rootPlayer));
+        }
+    }
+
+    return scores;
+}  //----- end of calculateMoveScores
+
+
+Minimax::Minimax(const MinimaxParams &p_params, int lookahead, float decay)
+    : params(p_params), analyzer(lookahead, decay)
+// Algorithm : Initialize the spatial analyzer and validate the search horizon and reward weights.
+{
+    if (params.depth < 1)
+    {
+        throw invalid_argument("Minimax depth must be positive");
+    }
+
+    const Rewards &weights = params.rewards;
+
+    for (double weight : {weights.selfSpace, weights.selfBlockRisk, weights.selfHeatRisk, weights.snakeLength,
+                          weights.oppSpace, weights.oppBlockRisk, weights.oppHeatRisk})
+    {
+        if (!isfinite(weight))
+        {
+            throw invalid_argument("Minimax reward weights must be finite");
+        }
+    }
+}  //----- end of Minimax
+
+
+//---------------------------------------------------------------- PRIVATE
+float Minimax::evaluateState(const GameState &state, int rootPlayer) const
+// Algorithm : Weight the root's territory, risks and length, then subtract each living opponent's weighted territory and risks.
+{
+    const Rewards &weights = params.rewards;
+    AreaResult areas = analyzer.calculateAreas(state);
+    ReachTiming timing = analyzer.computeReachTiming(state);
+    const auto &rootSnake = state.players.at(rootPlayer).snake;
+    float rootHeatRisk = analyzer.calculateDirectionalRisk(analyzer.calculateRiskHeatmap(timing, rootPlayer),
+                                                           rootSnake.front());
+
+    // Accumulate in a wider type before clamping so large finite weights cannot overlap terminal scores.
+    long double score = areas.space[rootPlayer] * static_cast<long double>(weights.selfSpace)
+                      + areas.blockRisk[rootPlayer] * static_cast<long double>(weights.selfBlockRisk)
+                      + rootHeatRisk * static_cast<long double>(weights.selfHeatRisk)
+                      + rootSnake.size() * static_cast<long double>(weights.snakeLength);
+
+    for (const auto &[opponent, data] : state.players)
+    {
+        if (opponent == rootPlayer || !data.playerInfo.alive)
+        {
+            continue;
+        }
+
+        float opponentHeatRisk = analyzer.calculateDirectionalRisk(analyzer.calculateRiskHeatmap(timing, opponent),
+                                                                   data.snake.front());
+        score -= areas.space[opponent] * static_cast<long double>(weights.oppSpace)
+               + areas.blockRisk[opponent] * static_cast<long double>(weights.oppBlockRisk)
+               + opponentHeatRisk * static_cast<long double>(weights.oppHeatRisk);
+    }
+
+    return static_cast<float>(clamp(score, -HEURISTIC_LIMIT, HEURISTIC_LIMIT));
+}  //----- end of evaluateState
+
+
+float Minimax::minimax(const GameEngine &engine, int depth, float alpha, float beta, int rootPlayer) const
+// Algorithm : Resolve terminal outcomes, then search scheduled slots with the root maximizing and opponents minimizing.
+{
+    if (engine.isTerminalFor(rootPlayer))
+    {
+        return engine.isAlive(rootPlayer) ? TERMINAL_SCORE : -TERMINAL_SCORE;
+    }
+
+    if (depth == 0)
+    {
+        return evaluateState(engine.getState(), rootPlayer);
+    }
+
+    int currentPlayer = engine.getState().currentPlayer;
+
+    if (!engine.isAlive(currentPlayer))
+    {
+        GameEngine next = engine;
+        next.finishTurn();
+        return minimax(next, depth - 1, alpha, beta, rootPlayer);
+    }
+
+    ActionMask mask = engine.getActionMask(currentPlayer);
+
+    if (mask.none())
+    {
+        // The engine treats any direction as a collision when none is legal.
+        GameEngine next = engine.successor(Action::Left);
+        return minimax(next, depth - 1, alpha, beta, rootPlayer);
+    }
+
+    bool maximizing = currentPlayer == rootPlayer;
+    float bestScore = maximizing ? -INFINITY_SCORE : INFINITY_SCORE;
+
+    for (size_t action = 0; action < mask.size(); action++)
+    {
+        if (!mask[action])
+        {
+            continue;
+        }
+
+        GameEngine next = engine.successor(static_cast<Action>(action));
+        float score = minimax(next, depth - 1, alpha, beta, rootPlayer);
+
+        if (maximizing)
+        {
+            bestScore = max(bestScore, score);
+            alpha = max(alpha, bestScore);
         }
         else
         {
-            // else, run the minimax algorithm
-            eval = minimax(simulatedState.first, simulatedState.second, params.depth - 1, alpha, beta, nextPlayer, turn + 1);
+            bestScore = min(bestScore, score);
+            beta = min(beta, bestScore);
         }
 
-        // Update the best value, alpha and beta
-        bestValue = max(bestValue, eval);
-        alpha = max(alpha, bestValue);
-
-        if (beta <= alpha) break; // Prunning
-
-        moveScores[move] = eval;
-    }
-
-    return moveScores;
-}  // ----- End of calculateMoveScores
-
-//-------------------------------------------------------------- PROTECTED
-pair<vector<float>, Players> Minimax::simulateMove(const string &move, const vector<float> &boardState,  // todo:change boardState shape
-                                                       const Players &playerState, int turn, int playerNum)
-// Algorithm : Simulate the move of a player and update the board and player states.
-{
-    // Make a copy of the current state
-    pair<vector<float>, Players> newState;
-    newState.first = boardState;
-    newState.second = playerState;
-
-
-    // Get current head and tail positions
-    Coord currentHead = newState.second[playerNum].snake.front();
-    Coord currentTail = newState.second[playerNum].snake.back();
-
-    // create new head position from the move
-    Coord newHead = {currentHead.x + DIRECTIONS.at(move).x,
-                     currentHead.y + DIRECTIONS.at(move).y
-    };
-
-
-    // Update snake based on chosen move
-    newState.second[playerNum].snake.push_front(newHead);
-
-    // Count alive players after the move
-    int alivePlayers = 0;
-    for (const auto &player : newState.second)
-    {
-        if (!gameEngine.checkDeath(newState.second, newState.first, player.first))
+        if (alpha >= beta)
         {
-            alivePlayers++;
-        }
-        else
-        {
-            newState.second[player.first].playerInfo.alive = false;
+            break;
         }
     }
 
-    int currentRound = ((turn) / alivePlayers); // turn+1 because this move increments the turn
-
-
-    // Remove tail segment if it's not a growth round from player states
-    if (currentRound % config.M != 0)
-    {
-        newState.second[playerNum].snake.pop_back();
-    }
-
-
-    int ind = (currentHead.y * config.W + currentHead.x) * boardChannels;  // current head
-    int newInd = (newHead.y * config.W + newHead.x) * boardChannels;  // new head
-
-    // Make the current head become a body part and create the new head
-    if (playerNum == config.P)
-    {
-        if (newState.first[ind] == 1.0)
-        {
-            newState.first[ind] = 0.0;
-            newState.first[ind + 1] = 1.0;
-        }
-        newState.first[newInd] = 1.0;
-
-        // remove tail segment if it's not a growth round from board state
-        if (currentRound % config.M != 0)
-        {
-            newState.first[(currentTail.y * config.W + currentTail.x) * boardChannels + 1] = 0.0;
-        }
-    }
-    else
-    {
-        if (newState.first[ind + 2] == 1.0)
-        {
-            newState.first[ind + 2] = 0.0;
-            newState.first[ind + 3] = 1.0;
-        }
-        newState.first[newInd + 2] = 1.0;
-
-        if (currentRound % config.M != 0)
-        {
-            newState.first[(currentTail.y * config.W + currentTail.x) * boardChannels + 3] = 0.0;
-        }
-    }
-
-    return newState;
-}  // ----- End of simulateMove
-
-
-float Minimax::evaluateState(const Players &playerState, int currentPlayer)
-// Algorithm : Evaluate the state of the game and return a score based on the player's position and risk.
-{
-    float score = 0.0;
-
-    // Heatmap and space analysis
-    pair<pair<vector<float>, vector<float>>, Matrix<float>> analysis = analyzer.analyzeState(playerState, currentPlayer);
-
-    // Reachable space, blocking risk and heat risk
-    float playerSpace = analysis.first.first[currentPlayer];
-    float playerBlockRisk = analysis.first.second[currentPlayer];
-    float playerHeatRisk = analyzer.calculateDirectionalRisk(analysis.second, playerState.at(currentPlayer).snake.front());
-
-
-    if (currentPlayer == config.P)
-    {
-        // Positive reward if gain of space or reduce blocking risk and negative if lose space and increase blocking risk
-        score += playerSpace * params.rewards.selfSpace;
-        score += playerBlockRisk * params.rewards.selfBlockRisk;
-        score += playerHeatRisk * params.rewards.selfHeatRisk;
-
-        // reward the player for surviving (the longer the player survives the bigger the reward)
-        score += playerState.at(config.P).snake.size() * params.rewards.snakeLength;
-    }
-    else
-    {
-        score -= playerSpace * params.rewards.oppSpace;
-        score -= playerBlockRisk * params.rewards.oppBlockRisk;
-        score -= playerHeatRisk * params.rewards.oppHeatRisk;
-    }
-
-    return score;
-}  // ----- End of evaluateState
-
-
-float Minimax::minimax(const vector<float> &boardState, Players playerState,
-                         int depth, float alpha, float beta, int currentPlayer, int turn)
-// Algorithm : Recursive miniMax with alpha-beta prunning to reduce the search space
-{
-    // check if the depth is 0 or a terminal state is reached
-    if (depth == 0 || gameEngine.terminalState()) {
-        return evaluateState(playerState, currentPlayer);
-    }
-
-    bool isMaximizing = (currentPlayer == config.P);  // check if the player of the node is the maximizing player
-    float bestValue = (isMaximizing) ? -numeric_limits<float>::infinity() : numeric_limits<float>::infinity();
-
-    // Get valid moves for the current player
-    vector<string> moves = helper.getValidMoves(boardState, playerState, currentPlayer);  // todo: modify
-
-    for (const auto &move : moves) {
-        // Simulate the move
-        auto simulatedState = simulateMove(move, boardState, playerState, turn, currentPlayer);
-        int nextPlayer = helper.getNextPlayer(currentPlayer, simulatedState.second);  // todo: modify
-
-        float eval;
-        if (nextPlayer == -1) {
-            // if a terminal state is reached, evaluate the state
-            eval = evaluateState(simulatedState.second, currentPlayer);
-        } else {
-            // else, run the minimax algorithm
-            eval = minimax(simulatedState.first, simulatedState.second,
-                            depth - 1, alpha, beta, nextPlayer, turn + 1);
-        }
-
-        // Update the best value, alpha and beta based on the player
-        if (isMaximizing) {
-            bestValue = max(bestValue, eval);
-            alpha = max(alpha, bestValue);
-        } else {
-            bestValue = min(bestValue, eval);
-            beta = min(beta, bestValue);
-        }
-
-        if (beta <= alpha) break; // Prunning
-    }
-
-    return bestValue;
-}  // ----- End of alphabeta
+    return bestScore;
+}  //----- end of minimax
