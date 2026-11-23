@@ -29,6 +29,7 @@ using namespace std;
 #include "src/DQN/ModelPersistence.h"
 #include "src/DQN/ResultValidation.h"
 #include "src/GameEngine/InputHandler.h"
+#include "src/Minimax/MinimaxParamsFile.h"
 #include "src/TrainingLoop.h"
 
 //------------------------------------------------------------------ Types
@@ -39,6 +40,7 @@ struct TrainingConfig {
     string checkpoint;
     bool resume = false;
     optional<float> hybridWeight;
+    optional<string> minimaxParams;
     int batchSize = 32;
     float learningRate = 0.00001f;
     int targetEvery = 100;
@@ -70,7 +72,7 @@ static TrainingConfig readArguments(int argc, char **argv)
         throw invalid_argument(
             "Usage: train EPISODES TRAIN_SETUP VALIDATION_SET CHECKPOINT [--resume] [--hybrid LAMBDA] "
             "[--batch-size N] [--learning-rate RATE] [--target-every UPDATES] "
-            "[--save-every EPISODES] [--evaluate-every EPISODES] [--seed N]"
+            "[--save-every EPISODES] [--evaluate-every EPISODES] [--seed N] [--minimax-params FILE]"
         );
     }
 
@@ -98,6 +100,10 @@ static TrainingConfig readArguments(int argc, char **argv)
         if (option == "--hybrid")
         {
             config.hybridWeight = parseHybridWeight(value);
+        }
+        else if (option == "--minimax-params")
+        {
+            config.minimaxParams = value;
         }
         else if (option == "--batch-size")
         {
@@ -184,6 +190,7 @@ static vector<ValidationMatch> readValidationSet(
 static void runTraining(const TrainingConfig &config)
 // Algorithm : Replay a configured matchup, update the learner after each decision, and save and evaluate between episodes.
 {
+    MinimaxParams params = config.minimaxParams ? loadMinimaxParams(*config.minimaxParams) : MinimaxParams{};
     ifstream input = openSetup(config.trainingSetup);
     GameConfig rules = InputHandler::readGameConfig(input);
     auto origins = InputHandler::readPlayersOrigins(rules.N, input);
@@ -194,7 +201,7 @@ static void runTraining(const TrainingConfig &config)
 
     GameEngine initial(rules, origins);
     Reward reward(rules);
-    MinimaxAgent minimax(MinimaxParams{});
+    MinimaxAgent minimax(params);
     vector<reference_wrapper<Agent>> opponents(rules.N - 1, ref(minimax));
     auto validationSet = readValidationSet(config.validationSet, rules.N, opponents);
 
@@ -207,8 +214,8 @@ static void runTraining(const TrainingConfig &config)
     ModelPersistence persistence;
     ResultValidation validation;
     int updates = config.resume ? persistence.loadDQN(learner, config.checkpoint) : 0;
-    auto behavior = makeNeuralAgent(learner, config.hybridWeight, true);
-    auto evaluated = makeNeuralAgent(learner, config.hybridWeight, false);
+    auto behavior = makeNeuralAgent(learner, config.hybridWeight, true, params);
+    auto evaluated = makeNeuralAgent(learner, config.hybridWeight, false, params);
 
     for (int episode = 0; episode < config.episodes; episode++)
     {

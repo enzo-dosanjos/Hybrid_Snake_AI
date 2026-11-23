@@ -274,7 +274,7 @@ Deep reinforcement learning approach:
 
 ## Usage
 
-Build `AI` and `train` with GNU Make and a C++17 compiler. Pass `AI` to the local
+Build `AI`, `train` and `optimise` with GNU Make and a C++17 compiler. Pass `AI` to the local
 match runner to play both seats on a 6×4 board with growth every round.
 
 ```sh
@@ -347,7 +347,45 @@ state, and the absolute update counter. It starts a fresh episode, and the
 save and evaluation intervals count episodes in the current invocation. Pass
 the same training settings when continuing a run.
 
+### Minimax parameter optimization
+
+Give `optimise` a file of competition setups in the validation format above.
+Each setup specifies the candidate's seat, and the default Minimax agent
+plays every other seat. Supply boards, origins and seats that reflect the
+matches you want the optimizer to score.
+
 ```sh
+./optimise validation.txt best_params.txt
+./optimise validation.txt best_params.txt --population 4 --generations 3 --seed 17
+```
+
+The genetic search evaluates every candidate on the same setups and ranks them
+by win rate. Mean survival turns are reported separately. The two highest-ranked
+individuals carry over, and the remaining candidates inherit each field from one
+of two uniformly sampled parents. The defaults are a population of 30, 50
+generations and seed 5489. The population must be at least 3. Initial weights
+use the legacy ranges and initial depths range from 6 to 10 scheduled slots.
+
+The first line of the output file stores the weights in the order
+`selfSpace oppSpace selfBlockRisk oppBlockRisk selfHeatRisk oppHeatRisk snakeLength`.
+The second line gives the depth. The optimizer replaces the named output with
+the winner after the search completes.
+
+```sh
+./AI minimax --minimax-params best_params.txt
+./AI hybrid model.model 0.5 --minimax-params best_params.txt
+./train 10 training.txt validation.txt tuned.model --hybrid 0.5 --minimax-params best_params.txt
+```
+
+Play and training load the file once at startup. In training, the parameters
+configure the Minimax opponents and the Minimax branch of Hybrid behavior and
+evaluation. Play and training use the built-in defaults when the option is
+omitted. When resuming tuned training, pass the same parameter file again.
+
+### Tests
+
+```sh
+make test TEST=optimise
 make test TEST="--checkpoint 3"
 make test
 ```
@@ -359,8 +397,6 @@ using DQN and Hybrid.
 
 
 ## todo:
-- finish optimise.cpp
-
 - optimise terminal state detection in Minimax (multiple methods and don't use the alive state)
 - optimise Minimax using transition table
 

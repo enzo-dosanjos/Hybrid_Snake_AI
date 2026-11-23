@@ -3,6 +3,7 @@ AI
 .idea
 temp/
 /train
+/optimise
 model.model
 best_params.txt
 /build/

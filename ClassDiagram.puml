@@ -339,6 +339,25 @@ package "Application" {
         Owns the DQN borrowed by the behavior agent, schedules replay
         training/target synchronization and invokes persistence/validation.
     end note
+
+    class Optimise <<control>> {
+        + optimise(config : OptimiseConfig, validationSet : vector<ValidationMatch>) : Individual
+    }
+
+    note bottom of Optimise
+        Evaluate every candidate against fixed opponents on the supplied setups.
+        Rank by win rate and report mean survival turns separately.
+        Save the winning weights and depth.
+    end note
+
+    class MinimaxParamsFile <<utility>> {
+        + loadMinimaxParams(filename : string) : MinimaxParams
+        + saveMinimaxParams(params : MinimaxParams, filename : string) : void
+    }
+
+    note bottom of MinimaxParamsFile
+        Play and training load parameters once at startup when requested.
+    end note
 }
 
 class Utils <<utility>> {
@@ -386,5 +405,10 @@ TrainingLoop ..> ResultValidation
 ModelPersistence ..> DQN
 ResultValidation ..> Agent
 ResultValidation ..> GameEngine
+Optimise ..> ResultValidation
+Optimise ..> MinimaxAgent
+Optimise ..> MinimaxParamsFile : saves winner
+GameLoop ..> MinimaxParamsFile : optional startup load
+TrainingLoop ..> MinimaxParamsFile : optional startup load
 
 @enduml

@@ -41,6 +41,8 @@ build/tests/result-validation: tests/ResultValidationTests.cpp $(TEST_DQN) src/A
 build/tests/training-loop: tests/TrainingLoopTests.cpp $(TEST_ENGINE) $(TEST_ENCODING) src/TrainingLoop.cpp src/DQN/Reward.cpp
 build/tests/training-cli: TEST_FLAGS += -DTRAIN_EXECUTABLE=\"$(CURDIR)/train\" -DSNAKE_EXECUTABLE=\"$(CURDIR)/AI\"
 build/tests/training-cli: tests/TrainingCliTests.cpp | train AI
+build/tests/optimise: TEST_FLAGS += -DOPTIMISE_EXECUTABLE=\"$(CURDIR)/optimise\" -DTRAIN_EXECUTABLE=\"$(CURDIR)/train\" -DSNAKE_EXECUTABLE=\"$(CURDIR)/AI\"
+build/tests/optimise: tests/OptimiseTests.cpp | optimise train AI
 
 build/tests/%: tests/TestMain.cpp $(TEST_HEADERS) | build/tests
 	$(CXX) $(TEST_FLAGS) $(TEST_INCLUDES) $(filter %.cpp,$^) -o $@

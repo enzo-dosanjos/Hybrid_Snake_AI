@@ -50,12 +50,13 @@ inline float parseHybridWeight(const std::string &text)
 }  //----- end of parseHybridWeight
 
 
-inline std::unique_ptr<Agent> makeNeuralAgent(DQN &learner, std::optional<float> hybridWeight, bool explore)
+inline std::unique_ptr<Agent> makeNeuralAgent(DQN &learner, std::optional<float> hybridWeight,
+                                             bool explore, const MinimaxParams &params)
 // Algorithm : Construct the selected behavior with the shared learner and requested exploration mode.
 {
     if (hybridWeight)
     {
-        return std::make_unique<HybridAgent>(learner, MinimaxParams{}, *hybridWeight, explore);
+        return std::make_unique<HybridAgent>(learner, params, *hybridWeight, explore);
     }
 
     return std::make_unique<DQNAgent>(learner, explore);

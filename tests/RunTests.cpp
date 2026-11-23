@@ -94,7 +94,7 @@ int main(int argc, char **argv)
     vector<string> suites = {
         "game-engine", "input-handler", "game-loop", "observation", "state-analyzer", "space-risk-analyzer", "minimax",
         "cnn", "fcnn", "replay-buffer", "reward", "dqn", "dqn-agent", "hybrid-agent",
-        "persistence", "result-validation", "training-loop", "training-cli"
+        "persistence", "result-validation", "training-loop", "training-cli", "optimise"
     };
     vector<string> selected = suites;
 

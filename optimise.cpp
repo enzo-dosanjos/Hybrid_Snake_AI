@@ -1,267 +1,258 @@
 /*************************************************************************
-optimise - Implementation of a genetic algorithm to optimise the
-parameters of the Minimax algorithm.
+optimise - Tunes Minimax parameters on supplied validation matches
                              -------------------
     copyright            : (C) 2025 by Enzo DOS ANJOS
 *************************************************************************/
 
-#include <iostream>
-#include <fstream>
-#include <random>
+//------ Implementation of the module <optimise> (file optimise.cpp) ------
+
+//---------------------------------------------------------------- INCLUDE
+//--------------------------------------------------------- System Include
 #include <algorithm>
-#include <chrono>
-#include <sstream>
-#include <iomanip>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <random>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace std;
 
-#include "include/Minimax.h"
-#include "include/Structs.h"
+//------------------------------------------------------- Personal Include
+#include "src/Agent/MinimaxAgent.h"
+#include "src/DQN/ResultValidation.h"
+#include "src/GameEngine/InputHandler.h"
+#include "src/Minimax/MinimaxParamsFile.h"
 
-// Genetic Algorithm Configuration
-const int POPULATION_SIZE = 30;
-const int GENERATIONS = 50;
-const float MUTATION_RATE = 0.5;
-const int TOURNAMENT_SIZE = 3;
-const int ELITISM = 2;
-const int MATCHES_PER_INDIVIDUAL = 1;
+//------------------------------------------------------------------ Types
+struct OptimiseConfig {
+    string validationSet;
+    string output;
+    int populationSize = 30;
+    int generations = 50;
+    int seed = mt19937::default_seed;
+};
 
-// Game parameters bounds with step size
-const vector<int> W_STEPS = {5, 10, 15, 20, 25, 30, 35, 40, 45, 50};
-const vector<int> H_STEPS = {5, 10, 15, 20, 25, 30, 35, 40, 45, 50};
-const vector<int> M_VALUES = {1, 3, 5, 7, 9, 10};
+struct Individual {
+    MinimaxParams params;
+    ValidationResult result;
+    float score = -1.f;
+};
 
-class Individual {
-public:
-    MinimaxParams ai1_params;
-    MinimaxParams ai2_params;
-    double fitness = 0.0;
-    int survivalTurns = 0;
+struct WeightRange {
+    double Rewards::*weight;
+    double minimum;
+    double maximum;
+};
 
-    Individual() = default;
-    
-    Individual(random_device& rd) {
-        generate_random_params(rd);
+//-------------------------------------------------------------- Constants
+static constexpr int ELITISM = 2;
+static constexpr WeightRange WEIGHT_RANGES[] = {
+    {&Rewards::selfSpace, 0, 10},
+    {&Rewards::oppSpace, 0, 10},
+    {&Rewards::selfBlockRisk, -30, 0},
+    {&Rewards::oppBlockRisk, -30, 0},
+    {&Rewards::selfHeatRisk, -5, 0},
+    {&Rewards::oppHeatRisk, -5, 0},
+    {&Rewards::snakeLength, 0, 5}
+};
+
+//---------------------------------------------------------------- PRIVATE
+static OptimiseConfig readArguments(int argc, char **argv)
+// Algorithm : Read the validation and output paths and optional genetic search settings.
+{
+    if (argc < 3)
+    {
+        throw invalid_argument("Usage: optimise VALIDATION_SET OUTPUT [--population N] [--generations N] [--seed N]");
     }
 
-    void generate_random_params(random_device& rd) {
-        mt19937 gen(rd());
-        auto gen_params = [&]() {
-            MinimaxParams p;
-            uniform_real_distribution<> space_dist(0, 10);
-            uniform_real_distribution<> block_dist(-30, 0);
-            uniform_real_distribution<> heat_dist(-5, 0);
-            uniform_real_distribution<> length_dist(0, 5);
-            uniform_int_distribution<> depth_dist(6, 10);
-
-            p.rewards.selfSpace = space_dist(gen);
-            p.rewards.oppSpace = space_dist(gen);
-            p.rewards.selfBlockRisk = block_dist(gen);
-            p.rewards.oppBlockRisk = block_dist(gen);
-            p.rewards.selfHeatRisk = heat_dist(gen);
-            p.rewards.oppHeatRisk = heat_dist(gen);
-            p.rewards.snakeLength = length_dist(gen);
-            p.depth = depth_dist(gen);
-            return p;
-        };
-
-        ai1_params = gen_params();
-        ai2_params = gen_params();
-    }
-
-    void save_to_file(const string& filename, const GameConfig& config, bool best) const {
-        ofstream file;
-        if (best)
+    OptimiseConfig config;
+    config.validationSet = argv[1];
+    config.output = argv[2];
+    for (int index = 3; index < argc; index += 2)
+    {
+        string option = argv[index];
+        if (index + 1 == argc)
         {
-            file.open(filename, ios::app);
+            throw invalid_argument("Missing value for " + option);
+        }
+
+        string argument = argv[index + 1];
+        size_t end = 0;
+        int value = stoi(argument, &end);
+        if (end != argument.size() || value < 0)
+        {
+            throw invalid_argument("Invalid value for " + option);
+        }
+
+        if (option == "--population")
+        {
+            config.populationSize = value;
+        }
+        else if (option == "--generations")
+        {
+            config.generations = value;
+        }
+        else if (option == "--seed")
+        {
+            config.seed = value;
         }
         else
         {
-            file.open(filename);
+            throw invalid_argument("Unknown option " + option);
         }
-        file << "[" << config.W << "," << config.H << "," << config.M << "]\n";
-        file << fixed << setprecision(5);
-        file << "AI1{" << ai1_params.rewards.selfSpace << "," << ai1_params.rewards.oppSpace << ","
-             << ai1_params.rewards.selfBlockRisk << "," << ai1_params.rewards.oppBlockRisk << ","
-             << ai1_params.rewards.selfHeatRisk << "," << ai1_params.rewards.oppHeatRisk << ","
-             << ai1_params.rewards.snakeLength << "}\n";
-        file << "AI1Depth=" << ai1_params.depth << "\n";
-        file << "AI2{" << ai2_params.rewards.selfSpace << "," << ai2_params.rewards.oppSpace << ","
-             << ai2_params.rewards.selfBlockRisk << "," << ai2_params.rewards.oppBlockRisk << ","
-             << ai2_params.rewards.selfHeatRisk << "," << ai2_params.rewards.oppHeatRisk << ","
-             << ai2_params.rewards.snakeLength << "}\n";
-        file << "AI2Depth=" << ai2_params.depth << "\n\n";
     }
 
-    void mutate(random_device& rd) {
-        mt19937 gen(rd());
-        normal_distribution<> gauss(0.0, 0.2);
-        uniform_real_distribution<> prob(0.0, 1.0);
-
-        auto mutate_params = [&](MinimaxParams& params) {
-            auto mutate_value = [&](double& value, double min, double max) {
-                if(prob(gen) < MUTATION_RATE) {
-                    value = clamp(value + gauss(gen), min, max);
-                }
-            };
-
-            mutate_value(params.rewards.selfSpace, 0, 10);
-            mutate_value(params.rewards.oppSpace, 0, 10);
-            mutate_value(params.rewards.selfBlockRisk, -30, 0);
-            mutate_value(params.rewards.oppBlockRisk, -30, 0);
-            mutate_value(params.rewards.selfHeatRisk, -5, 0);
-            mutate_value(params.rewards.oppHeatRisk, -5, 0);
-            mutate_value(params.rewards.snakeLength, 0, 5);
-
-            if(prob(gen) < MUTATION_RATE) {
-                uniform_int_distribution<> depth_dist(1, 10);
-                params.depth = depth_dist(gen);
-            }
-        };
-
-        mutate_params(ai1_params);
-        mutate_params(ai2_params);
+    if (config.populationSize <= ELITISM || config.generations < 1)
+    {
+        throw invalid_argument("Expected at least three individuals and one generation");
     }
-};
 
-Individual crossover(const Individual& parent1, const Individual& parent2, random_device& rd) {
-    mt19937 gen(rd());
-    uniform_int_distribution<> coin(0, 1);
-    Individual child;
+    return config;
+}  //----- end of readArguments
 
-    auto crossover_params = [&](const MinimaxParams& p1, const MinimaxParams& p2) {
-        MinimaxParams p;
-        p.rewards.selfSpace = coin(gen) ? p1.rewards.selfSpace : p2.rewards.selfSpace;
-        p.rewards.oppSpace = coin(gen) ? p1.rewards.oppSpace : p2.rewards.oppSpace;
-        p.rewards.selfBlockRisk = coin(gen) ? p1.rewards.selfBlockRisk : p2.rewards.selfBlockRisk;
-        p.rewards.oppBlockRisk = coin(gen) ? p1.rewards.oppBlockRisk : p2.rewards.oppBlockRisk;
-        p.rewards.selfHeatRisk = coin(gen) ? p1.rewards.selfHeatRisk : p2.rewards.selfHeatRisk;
-        p.rewards.oppHeatRisk = coin(gen) ? p1.rewards.oppHeatRisk : p2.rewards.oppHeatRisk;
-        p.rewards.snakeLength = coin(gen) ? p1.rewards.snakeLength : p2.rewards.snakeLength;
-        p.depth = coin(gen) ? p1.depth : p2.depth;
-        return p;
-    };
 
-    child.ai1_params = crossover_params(parent1.ai1_params, parent2.ai1_params);
-    child.ai2_params = crossover_params(parent1.ai2_params, parent2.ai2_params);
+static vector<ValidationMatch> readValidationSet(const string &filename, Agent &opponent)
+// Algorithm : Load complete competition setups and use the fixed opponent in every non-candidate seat.
+{
+    ifstream input(filename);
+    if (!input)
+    {
+        throw runtime_error("Cannot open validation set " + filename);
+    }
 
+    vector<ValidationMatch> matches;
+    while ((input >> ws).peek() != char_traits<char>::eof())
+    {
+        GameConfig rules = InputHandler::readGameConfig(input);
+        if (rules.N < 2)
+        {
+            throw invalid_argument("Optimization matches require at least two players");
+        }
+
+        auto origins = InputHandler::readPlayersOrigins(rules.N, input);
+        GameEngine{rules, origins};
+        vector<reference_wrapper<Agent>> opponents(rules.N - 1, ref(opponent));
+        matches.push_back({rules, move(origins), move(opponents)});
+    }
+
+    if (input.bad() || !input.eof() || matches.empty())
+    {
+        throw invalid_argument("Expected at least one complete validation setup in " + filename);
+    }
+
+    return matches;
+}  //----- end of readValidationSet
+
+
+static MinimaxParams randomParams(mt19937 &generator)
+// Algorithm : Sample each reward independently in its legacy range and start with depth six through ten.
+{
+    MinimaxParams params;
+    for (const auto &range : WEIGHT_RANGES)
+    {
+        params.rewards.*(range.weight) = uniform_real_distribution<double>(range.minimum, range.maximum)(generator);
+    }
+
+    params.depth = uniform_int_distribution<int>(6, 10)(generator);
+    return params;
+}  //----- end of randomParams
+
+
+static MinimaxParams crossover(const MinimaxParams &first, const MinimaxParams &second, mt19937 &generator)
+// Algorithm : Choose each reward and the depth independently from one of the two parents.
+{
+    MinimaxParams child;
+    uniform_int_distribution<int> coin(0, 1);
+    for (const auto &range : WEIGHT_RANGES)
+    {
+        const MinimaxParams &parent = coin(generator) ? first : second;
+        child.rewards.*(range.weight) = parent.rewards.*(range.weight);
+    }
+
+    child.depth = coin(generator) ? first.depth : second.depth;
     return child;
-}
+}  //----- end of crossover
 
-pair<bool, int> analyze_game_log(const string& filename) {
-    ifstream log_file(filename);
-    string line;
-    int lastTurn = 0;
-    int loser = -1;
 
-    while(getline(log_file, line)) {
-        if(line.find("**Turn ") != string::npos) {
-            lastTurn = stoi(line.substr(7, line.find("**") - 7));
-        }
-        else if(line.find("is eliminated") != string::npos) {
-            loser = (line.find("AI 0") != string::npos) ? 0 : 1;
-        }
+static Individual optimise(const OptimiseConfig &config, const vector<ValidationMatch> &matches)
+// Algorithm : Evaluate each generation on the same matches, retain two elites and cross uniformly sampled parents.
+{
+    mt19937 generator(config.seed);
+    vector<Individual> population(config.populationSize);
+    for (auto &individual : population)
+    {
+        individual.params = randomParams(generator);
     }
 
-    return {loser != 0, lastTurn}; // Returns (ai1_won, survivalTurns)
-}
+    ResultValidation validation;
+    Individual best;
+    uniform_int_distribution<int> parentIndex(0, config.populationSize - 1);
 
-double evaluate_individual(Individual& ind, const GameConfig& config, random_device& rd) {
-    double total_fitness = 0.0;
-    
-    for(int i = 0; i < MATCHES_PER_INDIVIDUAL; ++i) {
-        // Save parameters
-        ind.save_to_file("current_params.txt", config, false);
-
-        // Build command
-        stringstream cmd;
-        cmd << "python3 snake.py -g " << config.W << " " << config.H 
-            << " -G " << config.M << " bot bot > game_log.txt 2>&1";
-
-        // Execute
-        int result = system(cmd.str().c_str());
-        
-        // Analyze results
-        auto [ai1_won, turns] = analyze_game_log("game_log.txt");
-        ind.survivalTurns += turns;
-
-        // Print match result
-        cout << "Game " << config.W << "x" << config.H << " M" << config.M 
-             << " - " << (ai1_won ? "AI1" : "AI2") << " won after " 
-             << turns << " turns\n";
-
-        // Update fitness (25% for winning, 75% for survival time)
-        total_fitness += (ai1_won ? 0.25 : 0) + 0.75*((float)turns / (float)(config.W * config.H * config.M));
-    }
-    
-    ind.fitness = total_fitness / MATCHES_PER_INDIVIDUAL;
-    return ind.fitness;
-}
-
-void run_genetic_algorithm(const GameConfig& config) {
-    random_device rd;
-    mt19937 gen(rd());
-    
-    vector<Individual> population(POPULATION_SIZE);
-    generate(population.begin(), population.end(), [&]() { return Individual(rd); });
-
-    Individual best_individual;
-    double best_fitness = -1;
-
-    for(int generation = 0; generation < GENERATIONS; ++generation) {
-        // Evaluate population
-        for(auto& ind : population) {
-            evaluate_individual(ind, config, rd);
-            if(ind.fitness > best_fitness) {
-                best_fitness = ind.fitness;
-                best_individual = ind;
+    for (int generation = 0; generation < config.generations; generation++)
+    {
+        for (auto &individual : population)
+        {
+            MinimaxAgent agent(individual.params);
+            individual.result = validation.validate(agent, matches);
+            individual.score = validation.calculateScore(individual.result);
+            if (individual.score > best.score)
+            {
+                best = individual;
             }
         }
 
-        // Sort and create new population
-        sort(population.begin(), population.end(), 
-            [](const Individual& a, const Individual& b) { return a.fitness > b.fitness; });
-
-        vector<Individual> new_population;
-        for(int i = 0; i < ELITISM; ++i) {
-            new_population.push_back(population[i]);
+        if (generation + 1 == config.generations)
+        {
+            break;
         }
 
-        uniform_int_distribution<size_t> dist(0, POPULATION_SIZE-1);
-        while(new_population.size() < POPULATION_SIZE) {
-            const auto& parent1 = population[dist(gen)];
-            const auto& parent2 = population[dist(gen)];
-            new_population.push_back(crossover(parent1, parent2, rd));
+        // Keep population order when candidates have equal win rates.
+        stable_sort(population.begin(), population.end(), [](const Individual &first, const Individual &second)
+        {
+            return first.score > second.score;
+        });
+
+        vector<Individual> next(population.begin(), population.begin() + ELITISM);
+        while (next.size() < population.size())
+        {
+            const auto &first = population[parentIndex(generator)].params;
+            const auto &second = population[parentIndex(generator)].params;
+            Individual child;
+            child.params = crossover(first, second, generator);
+            next.push_back(child);
         }
 
-        population = new_population;
-
-        cout << "Config [" << config.W << "," << config.H << "," << config.M 
-             << "] Generation " << generation << " completed. Best fitness: " 
-             << best_fitness << endl;
+        population.swap(next);
     }
 
-    // Save best for this configuration
-    best_individual.save_to_file("best_params.txt", config, true);
-}
+    return best;
+}  //----- end of optimise
 
-int main() {
-    // Generate all configurations
-    vector<GameConfig> configs;
-    for(int W : W_STEPS) {
-        for(int H : H_STEPS) {
-            for(int M : M_VALUES) {
-                configs.push_back({W, H, M});
-            }
-        }
+
+//----------------------------------------------------------------- PUBLIC
+//--------------------------------------------------------- Public Methods
+int main(int argc, char **argv)
+// Algorithm : Optimize against the default Minimax opponent, save the winner and report validation metrics.
+{
+    try
+    {
+        OptimiseConfig config = readArguments(argc, argv);
+        MinimaxAgent opponent(MinimaxParams{});
+        auto matches = readValidationSet(config.validationSet, opponent);
+        Individual best = optimise(config, matches);
+        saveMinimaxParams(best.params, config.output);
+        cout << "optimisation wins=" << best.result.wins << '/' << best.result.matches
+             << " win_rate=" << best.score << " mean_survival_turns=" << best.result.meanSurvivalTurns
+             << " depth=" << best.params.depth << " output=" << config.output << '\n';
     }
-
-    // Process each configuration
-    for(const auto& config : configs) {
-        cout << "\n=== Starting configuration [" << config.W << "," 
-             << config.H << "," << config.M << "] ===\n";
-        run_genetic_algorithm(config);
+    catch (const exception &error)
+    {
+        cerr << error.what() << endl;
+        return 1;
     }
 
     return 0;
-}
+}  //----- end of main

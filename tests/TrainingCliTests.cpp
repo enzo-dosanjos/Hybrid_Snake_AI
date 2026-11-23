@@ -8,68 +8,15 @@ TrainingCliTests - Exercises training, resume and play executables
 
 //---------------------------------------------------------------- INCLUDE
 //--------------------------------------------------------- System Include
-#include <cerrno>
-#include <cstdio>
 #include <fstream>
-#include <iterator>
-#include <sys/wait.h>
-#include <unistd.h>
+#include <string>
 
 using namespace std;
 
 //------------------------------------------------------- Personal Include
-#include "Test.h"
+#include "WorkflowTest.h"
 
 //---------------------------------------------------------------- PRIVATE
-static string readFile(const string &filename)
-// Algorithm : Read a complete test output or checkpoint for comparison.
-{
-    ifstream file(filename, ios::binary);
-    check(bool(file), "Cannot read " + filename);
-    return string(istreambuf_iterator<char>(file), istreambuf_iterator<char>());
-}  //----- end of readFile
-
-
-static pair<int, string> runExecutable(const vector<string> &arguments, const string &input = "")
-// Algorithm : Run a real entry point with redirected input and capture its exit code and output.
-{
-    ofstream("stdin.txt") << input;
-    vector<char*> argv;
-    for (const auto &argument : arguments)
-    {
-        argv.push_back(const_cast<char*>(argument.c_str()));
-    }
-
-    argv.push_back(nullptr);
-    pid_t child = fork();
-    check(child >= 0, "Cannot start workflow executable");
-
-    if (child == 0)
-    {
-        alarm(10);
-        if (!freopen("stdin.txt", "r", stdin) || !freopen("stdout.txt", "w", stdout) ||
-            !freopen("stderr.txt", "w", stderr))
-        {
-            _exit(126);
-        }
-
-        execv(argv[0], argv.data());
-        _exit(127);
-    }
-
-    int status;
-    pid_t result;
-    do
-    {
-        result = waitpid(child, &status, 0);
-    } while (result < 0 && errno == EINTR);
-
-    check(result == child && WIFEXITED(status) && WEXITSTATUS(status) < 126,
-          "Workflow executable could not run or timed out");
-    return {WEXITSTATUS(status), readFile("stdout.txt")};
-}  //----- end of runExecutable
-
-
 static void writeSetups()
 // Algorithm : Write a one-decision training board and a separate two-seat validation set.
 {
