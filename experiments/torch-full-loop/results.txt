@@ -1,0 +1,92 @@
+patching file src/DQN/CNN.h
+patching file src/DQN/FCNN.h
+patching file src/DQN/DQN.cpp
+src/DQN/DQN.cpp: In static member function ‘static std::array<float, 4> DQN::evaluate(FCNN&, const FeatureTensor&, const std::vector<float>&)’:
+src/DQN/DQN.cpp:294:12: warning: ‘values’ may be used uninitialized [-Wmaybe-uninitialized]
+  294 |     return values;
+      |            ^~~~~~
+src/DQN/DQN.cpp:292:21: note: ‘values’ declared here
+  292 |     array<float, 4> values;
+      |                     ^~~~~~
+dqn-cpp
+checkpoint episode=6 updates=166
+evaluation episode=6 updates=166 wins=0/4 win_rate=0 mean_survival_turns=25
+profile play_seconds=3.53483 update_seconds=4.72334 loop_seconds=8.35606
+process_seconds=8.35
+dqn-4
+checkpoint episode=6 updates=166
+evaluation episode=6 updates=166 wins=0/4 win_rate=0 mean_survival_turns=25
+profile play_seconds=3.60206 update_seconds=0.445883 loop_seconds=4.15272
+process_seconds=5.03
+dqn-8
+checkpoint episode=6 updates=166
+evaluation episode=6 updates=166 wins=0/4 win_rate=0 mean_survival_turns=25
+profile play_seconds=3.71067 update_seconds=0.508948 loop_seconds=4.32173
+process_seconds=5.17
+dqn-16
+checkpoint episode=6 updates=166
+evaluation episode=6 updates=166 wins=0/4 win_rate=0 mean_survival_turns=25
+profile play_seconds=3.91734 update_seconds=0.51784 loop_seconds=4.53874
+process_seconds=5.38
+dqn-32
+checkpoint episode=6 updates=166
+evaluation episode=6 updates=166 wins=0/4 win_rate=0 mean_survival_turns=25
+profile play_seconds=4.08238 update_seconds=70.0473 loop_seconds=74.2352
+process_seconds=75.07
+hybrid-cpp
+checkpoint episode=6 updates=308
+evaluation episode=6 updates=308 wins=1/4 win_rate=0.25 mean_survival_turns=30.75
+profile play_seconds=6.08205 update_seconds=9.12345 loop_seconds=15.4017
+process_seconds=15.40
+hybrid-4
+checkpoint episode=6 updates=308
+evaluation episode=6 updates=308 wins=1/4 win_rate=0.25 mean_survival_turns=30.75
+profile play_seconds=6.38044 update_seconds=0.800507 loop_seconds=7.38474
+process_seconds=8.25
+hybrid-8
+checkpoint episode=6 updates=308
+evaluation episode=6 updates=308 wins=1/4 win_rate=0.25 mean_survival_turns=30.75
+profile play_seconds=6.4019 update_seconds=0.893486 loop_seconds=7.50117
+process_seconds=8.34
+hybrid-16
+checkpoint episode=6 updates=308
+evaluation episode=6 updates=308 wins=1/4 win_rate=0.25 mean_survival_turns=30.75
+profile play_seconds=6.73092 update_seconds=0.930323 loop_seconds=7.86592
+process_seconds=8.70
+hybrid-32
+checkpoint episode=6 updates=308
+evaluation episode=6 updates=308 wins=1/4 win_rate=0.25 mean_survival_turns=30.75
+profile play_seconds=7.07619 update_seconds=134.773 loop_seconds=142.059
+process_seconds=142.90
+dqn-1
+checkpoint episode=6 updates=166
+evaluation episode=6 updates=166 wins=0/4 win_rate=0 mean_survival_turns=25
+profile play_seconds=3.6294 update_seconds=0.521109 loop_seconds=4.25211
+process_seconds=5.11
+dqn-2
+checkpoint episode=6 updates=166
+evaluation episode=6 updates=166 wins=0/4 win_rate=0 mean_survival_turns=25
+profile play_seconds=3.66378 update_seconds=0.480637 loop_seconds=4.24773
+process_seconds=5.08
+hybrid-1
+checkpoint episode=6 updates=308
+evaluation episode=6 updates=308 wins=1/4 win_rate=0.25 mean_survival_turns=30.75
+profile play_seconds=6.34366 update_seconds=0.888251 loop_seconds=7.43541
+process_seconds=8.28
+hybrid-2
+checkpoint episode=6 updates=308
+evaluation episode=6 updates=308 wins=1/4 win_rate=0.25 mean_survival_turns=30.75
+profile play_seconds=6.38228 update_seconds=0.819264 loop_seconds=7.40595
+process_seconds=8.23
+dqn 1 identical replay and RNG; max parameter difference 7.500000009930119e-09
+dqn 2 identical replay and RNG; max parameter difference 7.500000009930119e-09
+dqn 4 identical replay and RNG; max parameter difference 7.500000009930119e-09
+dqn 8 identical replay and RNG; max parameter difference 7.500000009930119e-09
+dqn 16 identical replay and RNG; max parameter difference 7.500000009930119e-09
+dqn 32 identical replay and RNG; max parameter difference 7.500000009930119e-09
+hybrid 1 identical replay and RNG; max parameter difference 3.00000000119649e-08
+hybrid 2 identical replay and RNG; max parameter difference 3.00000000119649e-08
+hybrid 4 identical replay and RNG; max parameter difference 3.00000000119649e-08
+hybrid 8 identical replay and RNG; max parameter difference 3.00000000119649e-08
+hybrid 16 identical replay and RNG; max parameter difference 3.00000000119649e-08
+hybrid 32 identical replay and RNG; max parameter difference 3.00000000119649e-08

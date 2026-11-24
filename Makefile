@@ -58,8 +58,24 @@ $(BUILD_DIR):
 
 # Clean up everything
 clean:
-	rm -rf $(BUILD_DIR) $(TARGET) train optimise
+	rm -rf $(BUILD_DIR) $(TARGET) train train-torch optimise
 
 -include $(sort $(PLAY_OBJECTS:.o=.d) $(TRAIN_OBJECTS:.o=.d) $(OPTIMISE_OBJECTS:.o=.d))
 
 include tests/Makefile
+
+# TORCH_ROOT is the LibTorch distribution or a Python environment's torch package.
+TORCH_BUILD := $(BUILD_DIR)/libtorch
+TORCH_OBJECTS := $(patsubst %.cpp,$(TORCH_BUILD)/%.o,$(TRAIN_SOURCES) src/DQN/TorchNetwork.cpp)
+TORCH_FLAGS := -DSNAKE_LIBTORCH -isystem $(TORCH_ROOT)/include -isystem $(TORCH_ROOT)/include/torch/csrc/api/include
+TORCH_LIBS := -L$(TORCH_ROOT)/lib -Wl,-rpath,$(TORCH_ROOT)/lib -ltorch -ltorch_cpu -lc10
+
+train-torch: $(TORCH_OBJECTS)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(TORCH_LIBS)
+
+$(TORCH_BUILD)/%.o: %.cpp
+	@test -f "$(TORCH_ROOT)/include/ATen/ATen.h" || { echo "Set TORCH_ROOT to the LibTorch installation"; exit 1; }
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(TORCH_FLAGS) -MMD -MP -c $< -o $@
+
+-include $(TORCH_OBJECTS:.o=.d)

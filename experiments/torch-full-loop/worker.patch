@@ -1,0 +1,163 @@
+--- a/src/DQN/CNN.h
++++ b/src/DQN/CNN.h
+@@ -98,6 +98,7 @@
+ //---------------------------------------------------------------- PRIVATE
+     private:
+         friend class ModelPersistence;
++        friend class DQN;
+ 
+         void validateSpatialSize(int height, int width) const;
+         static FeatureTensor padInput(const FeatureTensor &input, int padding);
+--- a/src/DQN/FCNN.h
++++ b/src/DQN/FCNN.h
+@@ -87,6 +87,7 @@
+ //---------------------------------------------------------------- PRIVATE
+     private:
+         friend class ModelPersistence;
++        friend class DQN;
+ 
+         static void computeLayer(FullyConnectedLayer &layer, const std::vector<float> &input);
+ 
+--- a/src/DQN/DQN.cpp
++++ b/src/DQN/DQN.cpp
+@@ -8,6 +8,8 @@
+ 
+ //---------------------------------------------------------------- INCLUDE
+ //--------------------------------------------------------- System Include
++#include <sys/socket.h>
++#include <cstdlib>
+ #include <algorithm>
+ #include <cmath>
+ #include <limits>
+@@ -114,32 +116,108 @@
+         return;
+     }
+ 
+-    cnn.resetGradients();
+-    fcnn.resetGradients();
++    // The disposable pilot uses one local socket and the default 10x10 layout.
++    int socket = stoi(getenv("SNAKE_WORKER_FD"));
++    vector<float> request = {static_cast<float>(batch.size()), learningRate, config.gamma};
++    vector<vector<float> *> onlineRows;
++
++    auto appendRow = [&](vector<float> &row, bool online)
++    {
++        request.insert(request.end(), row.begin(), row.end());
++        if (online)
++        {
++            onlineRows.push_back(&row);
++        }
++    };
++
++    // Preserve the checkpoint's input-major ordering for both networks.
++    for (bool online : {true, false})
++    {
++        for (auto &layer : (online ? cnn : targetCNN).nn)
++        {
++            for (auto &input : layer.weights)
++            {
++                for (auto &kernel : input)
++                {
++                    for (auto &row : kernel)
++                    {
++                        appendRow(row, online);
++                    }
++                }
++            }
++            appendRow(layer.biases, online);
++        }
++
++        for (auto &layer : (online ? fcnn : targetFCNN).nn)
++        {
++            for (auto &row : layer.weights)
++            {
++                appendRow(row, online);
++            }
++            appendRow(layer.biases, online);
++        }
++    }
+ 
+     for (const Transition &transition : batch)
+     {
+-        float target = bellmanTarget(transition);
+-        auto cnnOutput = cnn.forwardPropagation(transition.state.board);
+-        auto values = evaluate(fcnn, cnnOutput, transition.state.extraFeatures);
+-        int action = static_cast<int>(transition.action);
+-
+-        // The derivative of half-squared TD error is zero for the other action outputs.
+-        vector<float> outputGradient(values.size(), 0.f);
+-        outputGradient[action] = values[action] - target;
+-        auto inputGradient = fcnn.backPropagation(outputGradient);
+-
+-        // Only the prefix of the dense input came from the CNN.
+-        inputGradient.resize(cnnOutput.size());
+-        cnn.backPropagation(CNN::globalAvgPoolingBackward(inputGradient, cnnOutput));
+-
+-        fcnn.accumulateGradients();
+-        cnn.accumulateGradients();
+-    }
+-
+-    float stepSize = learningRate / batch.size();
+-    fcnn.updateWeights(stepSize);
+-    cnn.updateWeights(stepSize);
++        for (const auto *state : {&transition.state, &transition.nextState})
++        {
++            size_t start = request.size();
++            for (const auto &channel : state->board)
++            {
++                for (const auto &row : channel)
++                {
++                    request.insert(request.end(), row.begin(), row.end());
++                }
++            }
++            request.insert(request.end(), state->extraFeatures.begin(), state->extraFeatures.end());
++
++            if (state == &transition.nextState && transition.done && request.size() == start)
++            {
++                request.resize(start + 921);
++            }
++            if (request.size() != start + 921)
++            {
++                throw runtime_error("Expected a 9x10x10 board and 21 extras");
++            }
++        }
++
++        request.push_back(static_cast<int>(transition.action));
++        request.push_back(transition.reward);
++        request.push_back(transition.done ? 0 : transition.nextState.legalActions.to_ulong());
++    }
++
++    const char *data = reinterpret_cast<const char *>(request.data());
++    size_t remaining = request.size() * sizeof(float);
++    while (remaining > 0)
++    {
++        auto sent = send(socket, data, remaining, MSG_NOSIGNAL);
++        if (sent <= 0)
++        {
++            throw runtime_error("PyTorch worker stopped reading");
++        }
++        data += sent;
++        remaining -= sent;
++    }
++
++    size_t parameters = 0;
++    for (const auto *row : onlineRows)
++    {
++        parameters += row->size();
++    }
++    vector<float> updated(parameters);
++    auto bytes = static_cast<ssize_t>(parameters * sizeof(float));
++    if (recv(socket, updated.data(), bytes, MSG_WAITALL) != bytes)
++    {
++        throw runtime_error("Incomplete PyTorch update");
++    }
++
++    auto next = updated.begin();
++    for (auto *row : onlineRows)
++    {
++        copy_n(next, row->size(), row->begin());
++        next += row->size();
++    }
+     decayEpsilon();
+ }  //----- end of train
+ 

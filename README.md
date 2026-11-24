@@ -335,6 +335,22 @@ training and validation. Start a fresh run with a new checkpoint path.
 ./train 10 training.txt validation.txt hybrid.model --hybrid 0.5
 ```
 
+For CPU tensor training, build the optional C++ LibTorch executable with a
+C++17-compatible LibTorch installation. `TORCH_ROOT` contains its `include/`
+and `lib/` directories. The desktop uses the torch package in its training
+Python environment as that installation.
+
+```sh
+export TORCH_ROOT=$(python -c 'import torch; print(torch.__path__[0])')
+make -j4 train-torch CXXFLAGS="-std=c++17 -O2 -DNDEBUG"
+./train-torch 10 training.txt validation.txt model.model --torch-threads 4
+```
+
+Four intra-operation CPU threads are the default. The trainer batches boards
+of the same shape for convolution and uses the online network for acting.
+Both trainers and the standalone C++ player read the same checkpoint format.
+Use `--resume` to continue training a checkpoint with either trainer.
+
 Each episode starts from the training setup. The learner explores during
 training and updates replay once per executed learner decision. A transition
 includes the intervening opponent turns and ends at the next learner decision
