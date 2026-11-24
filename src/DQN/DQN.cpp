@@ -83,7 +83,12 @@ optional<Action> DQN::sampleExplorationAction(const ActionMask &legalActions)
 array<float, 4> DQN::forwardPropagation(const EncodedState &state)
 // Algorithm : Encode the board with the online CNN and evaluate it together with the selected extras.
 {
+#ifdef SNAKE_LIBTORCH
+    prepareTorchNetworks();
+    return onlineTorch.predict(state, config);
+#else
     return evaluate(fcnn, cnn.forwardPropagation(state.board), state.extraFeatures);
+#endif
 }  //----- end of forwardPropagation
 
 
@@ -114,6 +119,10 @@ void DQN::train(int batchSize, float learningRate)
         return;
     }
 
+#ifdef SNAKE_LIBTORCH
+    prepareTorchNetworks();
+    onlineTorch.update(batch, targetTorch, config, learningRate);
+#else
     cnn.resetGradients();
     fcnn.resetGradients();
 
@@ -140,6 +149,7 @@ void DQN::train(int batchSize, float learningRate)
     float stepSize = learningRate / batch.size();
     fcnn.updateWeights(stepSize);
     cnn.updateWeights(stepSize);
+#endif
     decayEpsilon();
 }  //----- end of train
 
@@ -147,8 +157,13 @@ void DQN::train(int batchSize, float learningRate)
 void DQN::updateTargetNetworks()
 // Algorithm : Copy the latest online weights and biases without changing the online training state.
 {
+#ifdef SNAKE_LIBTORCH
+    prepareTorchNetworks();
+    targetTorch = onlineTorch;
+#else
     targetCNN.copyWeights(cnn);
     targetFCNN.copyWeights(fcnn);
+#endif
 }  //----- end of updateTargetNetworks
 
 
@@ -255,3 +270,15 @@ void DQN::decayEpsilon()
         epsilon = max(config.minEpsilon, epsilon * config.epsilonDecay);
     }
 }  //----- end of decayEpsilon
+
+#ifdef SNAKE_LIBTORCH
+void DQN::prepareTorchNetworks()
+// Algorithm : Import the initialized or restored native parameters on first use.
+{
+    if (onlineTorch.empty())
+    {
+        onlineTorch = TorchNetwork(cnn, fcnn);
+        targetTorch = TorchNetwork(targetCNN, targetFCNN);
+    }
+}  //----- end of prepareTorchNetworks
+#endif

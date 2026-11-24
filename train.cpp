@@ -41,6 +41,9 @@ struct TrainingConfig {
     bool resume = false;
     optional<float> hybridWeight;
     optional<string> minimaxParams;
+#ifdef SNAKE_LIBTORCH
+    int torchThreads = 4;
+#endif
     int batchSize = 32;
     float learningRate = 0.00001f;
     int targetEvery = 100;
@@ -73,6 +76,9 @@ static TrainingConfig readArguments(int argc, char **argv)
             "Usage: train EPISODES TRAIN_SETUP VALIDATION_SET CHECKPOINT [--resume] [--hybrid LAMBDA] "
             "[--batch-size N] [--learning-rate RATE] [--target-every UPDATES] "
             "[--save-every EPISODES] [--evaluate-every EPISODES] [--seed N] [--minimax-params FILE]"
+#ifdef SNAKE_LIBTORCH
+            " [--torch-threads N]"
+#endif
         );
     }
 
@@ -105,6 +111,12 @@ static TrainingConfig readArguments(int argc, char **argv)
         {
             config.minimaxParams = value;
         }
+#ifdef SNAKE_LIBTORCH
+        else if (option == "--torch-threads")
+        {
+            config.torchThreads = parseInteger(value, option, 1);
+        }
+#endif
         else if (option == "--batch-size")
         {
             config.batchSize = parseInteger(value, option, 1);
@@ -210,6 +222,9 @@ static void runTraining(const TrainingConfig &config)
         throw invalid_argument("Checkpoint already exists. Use --resume or provide a new path.");
     }
 
+#ifdef SNAKE_LIBTORCH
+    TorchNetwork::setThreads(config.torchThreads);
+#endif
     DQN learner(makeApplicationModelConfig(rules.N), mt19937(config.seed));
     ModelPersistence persistence;
     ResultValidation validation;

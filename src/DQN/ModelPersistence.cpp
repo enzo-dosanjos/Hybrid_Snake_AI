@@ -301,19 +301,35 @@ void ModelPersistence::saveDQN(const DQN &dqn, const string &filename, int train
         writeValue(file, dqn.epsilon);
         file << '\n' << dqn.gen << '\n' << dqn.replayBuffer.gen << '\n';
 
-        auto writeNetwork = [&file](const auto &layers)
+#ifdef SNAKE_LIBTORCH
+        if (!dqn.onlineTorch.empty())
         {
-            for (const auto &layer : layers)
+            for (const auto *network : {&dqn.onlineTorch, &dqn.targetTorch})
             {
-                writeValues(file, layer.weights);
-                writeValues(file, layer.biases);
-                file << '\n';
+                for (const auto &row : network->checkpointRows())
+                {
+                    writeValues(file, row);
+                    file << '\n';
+                }
             }
-        };
-        writeNetwork(dqn.cnn.nn);
-        writeNetwork(dqn.fcnn.nn);
-        writeNetwork(dqn.targetCNN.nn);
-        writeNetwork(dqn.targetFCNN.nn);
+        }
+        else
+#endif
+        {
+            auto writeNetwork = [&file](const auto &layers)
+            {
+                for (const auto &layer : layers)
+                {
+                    writeValues(file, layer.weights);
+                    writeValues(file, layer.biases);
+                    file << '\n';
+                }
+            };
+            writeNetwork(dqn.cnn.nn);
+            writeNetwork(dqn.fcnn.nn);
+            writeNetwork(dqn.targetCNN.nn);
+            writeNetwork(dqn.targetFCNN.nn);
+        }
 
         file << dqn.replayBuffer.size() << '\n';
         for (const auto &transition : dqn.replayBuffer.buffer)

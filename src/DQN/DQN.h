@@ -22,6 +22,9 @@ DQN - Evaluates actions and learns from replayed Snake decisions
 
 //-------------------------------------------------------- Used interfaces
 #include "../Structs.h"
+#ifdef SNAKE_LIBTORCH
+#include "TorchNetwork.h"
+#endif
 #include "CNN.h"
 #include "FCNN.h"
 #include "ReplayBuffer.h"
@@ -68,6 +71,12 @@ class DQN {
         static int bestLegalIndex(const std::array<float, 4> &values, const ActionMask &legalActions);
         float bellmanTarget(const Transition &transition);
         void decayEpsilon();
+
+#ifdef SNAKE_LIBTORCH
+        void prepareTorchNetworks();
+        TorchNetwork onlineTorch;
+        TorchNetwork targetTorch;
+#endif
 
         CNN cnn;
         FCNN fcnn;

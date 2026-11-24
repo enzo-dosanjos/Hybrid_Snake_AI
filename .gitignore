@@ -11,3 +11,4 @@ best_params.txt
 # Local replay recordings and Python bytecode
 /replays/
 __pycache__/
+/train-torch
