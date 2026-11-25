@@ -79,3 +79,15 @@ $(TORCH_BUILD)/%.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(TORCH_FLAGS) -MMD -MP -c $< -o $@
 
 -include $(TORCH_OBJECTS:.o=.d)
+
+PILOT_SOURCES := experiments/terminal-pilot/Pilot.cpp experiments/terminal-pilot/RandomLegalAgent.cpp
+PILOT_OBJECTS := $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(PILOT_SOURCES))
+PILOT_TORCH_OBJECTS := $(patsubst %.cpp,$(TORCH_BUILD)/%.o,$(PILOT_SOURCES))
+
+$(BUILD_DIR)/pilot: $(PILOT_OBJECTS) $(filter-out $(BUILD_DIR)/train.o,$(TRAIN_OBJECTS))
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+$(BUILD_DIR)/pilot-torch: $(PILOT_TORCH_OBJECTS) $(filter-out $(TORCH_BUILD)/train.o,$(TORCH_OBJECTS))
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(TORCH_LIBS)
+
+-include $(PILOT_OBJECTS:.o=.d) $(PILOT_TORCH_OBJECTS:.o=.d)
