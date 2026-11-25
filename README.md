@@ -308,6 +308,15 @@ schema versions before restoring weights and training state.
 `0.5` gives equal weight to the normalized Minimax and neural scores. Hybrid
 weights range from `0` for Minimax scores to `1` for neural scores.
 
+### Minimax override margin
+
+Use `./AI hybrid-gap CHECKPOINT MARGIN --minimax-params FILE` to let the DQN
+choose among legal moves within MARGIN raw search-score units of the best
+Minimax move. Zero permits exact search ties. Search retains its choice on a
+proven win or when all moves lose within its horizon, and excludes proven
+losses when an alternative exists. The existing weighted hybrid is available
+through `./AI hybrid CHECKPOINT LAMBDA`.
+
 ### Training and validation
 
 `training.txt` contains one setup in competition format. It gives the board

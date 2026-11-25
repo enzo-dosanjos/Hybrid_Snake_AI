@@ -10,6 +10,7 @@ HybridAgent - Combines Minimax and learned action scores
 //--------------------------------------------------------- System Include
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -42,12 +43,37 @@ optional<Action> HybridAgent::selectAction(const GameEngine &engine)
     }
 
     // Use the original ranking at the endpoints, where only one scorer contributes.
-    if (lambda == 1.f)
+    if (!margin && lambda == 1.f)
     {
         return dqn.selectAction(encodeDecision(engine, player, dqn.getFeatureSelection()), false);
     }
 
     auto searchScores = minimax.calculateMoveScores(engine);
+    if (margin)
+    {
+        auto best = max_element(searchScores.begin(), searchScores.end(), [](const auto &left, const auto &right)
+        {
+            return left.second < right.second;
+        });
+        float terminal = numeric_limits<float>::max() / 4.f;
+        if (abs(best->second) == terminal || searchScores.size() == 1)
+        {
+            return best->first;
+        }
+
+        auto values = dqn.forwardPropagation(encodeDecision(engine, player, dqn.getFeatureSelection()));
+        Action choice = best->first;
+        for (const auto &[action, score] : searchScores)
+        {
+            if (score != -terminal && double(best->second) - score <= *margin &&
+                values[static_cast<int>(action)] > values[static_cast<int>(choice)])
+            {
+                choice = action;
+            }
+        }
+        return choice;
+    }
+
     if (lambda == 0.f)
     {
         return max_element(searchScores.begin(), searchScores.end(), [](const auto &left, const auto &right)
@@ -87,10 +113,15 @@ optional<Action> HybridAgent::selectAction(const GameEngine &engine)
 }  //----- end of selectAction
 
 
-HybridAgent::HybridAgent(DQN &p_dqn, const MinimaxParams &params, float p_lambda, bool p_explore)
-    : dqn(p_dqn), minimax(params), lambda(p_lambda), explore(p_explore)
+HybridAgent::HybridAgent(DQN &p_dqn, const MinimaxParams &params, float p_lambda, bool p_explore,
+                         optional<float> p_margin)
+    : dqn(p_dqn), minimax(params), lambda(p_lambda), explore(p_explore), margin(p_margin)
 // Algorithm : Keep the shared learner, configure search and validate the neural weighting.
 {
+    if (margin && (!isfinite(*margin) || *margin < 0.f || explore))
+    {
+        throw invalid_argument("Override margin requires greedy play and a finite nonnegative score gap");
+    }
     if (!(lambda >= 0.f && lambda <= 1.f))
     {
         throw invalid_argument("HybridAgent lambda must be in [0, 1]");

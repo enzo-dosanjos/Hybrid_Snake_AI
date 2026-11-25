@@ -61,6 +61,24 @@ void testNormalizedCompromise()
 }  //----- end of testNormalizedCompromise
 
 
+void testOverrideMargin()
+// Algorithm : Admit the second-ranked move while excluding a lower search score with a higher Q-value.
+{
+    auto engine = makeAgentDecision();
+    DQN learner(makeAgentModelConfig(), mt19937(6));
+    MinimaxParams params;
+    params.depth = 1;
+    auto scores = Minimax(params).calculateMoveScores(engine);
+    float margin = (scores.at(Action::Left) - scores.at(Action::Down) +
+                    scores.at(Action::Left) - scores.at(Action::Up)) / 2.f;
+
+    HybridAgent exact(learner, params, 1.f, false, 0.f);
+    HybridAgent near(learner, params, 1.f, false, margin);
+    check(exact.selectAction(engine) == Action::Left, "Exact gate overrode a unique search maximum");
+    check(near.selectAction(engine) == Action::Down, "Near-tie gate admitted the wrong neural choice");
+}  //----- end of testOverrideMargin
+
+
 void testEqualScoresAndTies()
 // Algorithm : Check that a constant scorer does not affect ranking and that a combined tie follows enum order.
 {
@@ -168,6 +186,7 @@ vector<TestCase> getTests()
 {
     return {
         {"normalized-compromise", testNormalizedCompromise},
+        {"override-margin", testOverrideMargin},
         {"equal-scores-and-ties", testEqualScoresAndTies},
         {"shared-exploration", testSharedExploration},
         {"invalid-lambda", testInvalidLambda}
