@@ -1,0 +1,35 @@
+fork-ranking-IPvdkIFt/ranked.model: OK
+selected current 717 8
+selected ranking 717 6
+selected sampling 717 1
+selected both 717 9
+selected current 41 24
+selected ranking 41 12
+selected sampling 41 9
+selected both 41 19
+selected current 79 25
+selected ranking 79 4
+selected sampling 79 7
+selected both 79 6
+score current 717 n/mixed/altWin/random/gain/lost/changes/seats 498 238 121.0 121.16666666666671 63 67 331.0 [-2.0, -2.0]
+score ranking 717 n/mixed/altWin/random/gain/lost/changes/seats 498 238 119.0 121.16666666666671 68 67 317.0 [-5.0, 6.0]
+score sampling 717 n/mixed/altWin/random/gain/lost/changes/seats 498 238 130.0 121.16666666666671 94 83 428.0 [-4.0, 15.0]
+score both 717 n/mixed/altWin/random/gain/lost/changes/seats 498 238 137.0 121.16666666666671 68 57 347.0 [-1.0, 12.0]
+score current 41 n/mixed/altWin/random/gain/lost/changes/seats 498 238 110.0 121.16666666666671 72 88 355.0 [-22.0, 6.0]
+score ranking 41 n/mixed/altWin/random/gain/lost/changes/seats 498 238 124.0 121.16666666666671 69 66 337.0 [-1.0, 4.0]
+score sampling 41 n/mixed/altWin/random/gain/lost/changes/seats 498 238 133.0 121.16666666666671 60 48 294.0 [10.0, 2.0]
+score both 41 n/mixed/altWin/random/gain/lost/changes/seats 498 238 129.0 121.16666666666671 69 67 345.0 [-2.0, 4.0]
+score current 79 n/mixed/altWin/random/gain/lost/changes/seats 498 238 112.0 121.16666666666671 60 73 361.0 [-18.0, 5.0]
+score ranking 79 n/mixed/altWin/random/gain/lost/changes/seats 498 238 129.0 121.16666666666671 76 69 363.0 [5.0, 2.0]
+score sampling 79 n/mixed/altWin/random/gain/lost/changes/seats 498 238 131.0 121.16666666666671 70 59 354.0 [4.0, 7.0]
+score both 79 n/mixed/altWin/random/gain/lost/changes/seats 498 238 121.0 121.16666666666671 60 62 337.0 [-5.0, 3.0]
+guard wins 293 [142, 151]
+CI current rank [-5.74468085  5.55611559]
+CI current wins [-4.88769531  3.3203125 ]
+CI ranking rank [-7.4325446   5.51280385]
+CI ranking wins [-4.296875  4.6875  ]
+CI sampling rank [-2.01110126  9.15317482]
+CI sampling wins [-2.9296875  7.2265625]
+CI both rank [ 0.6883795  12.40130975]
+CI both wins [-2.1484375  6.4453125]
+fork-ranking-IPvdkIFt/ranked.model: OK
