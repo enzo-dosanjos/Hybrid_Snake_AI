@@ -1,17 +1,46 @@
 # Hybrid AI for Competitive Snake
 
-![Recorded Snake match with numbered heads, connected bodies, ringed tails and move metrics](docs/images/match-demo.gif)
+![Guarded Minimax and the frozen DQN hybrid contest a 12×11 board over 198 turns](docs/images/match-demo.gif)
 
-*Illustrative match using hand-coded policies. Two players grow every three
-rounds, and a six-ply Minimax search checks the offensive heuristic's proposed
-moves.*
+*Guarded Minimax (teal) faces the frozen DQN hybrid (amber) head-to-head.
+On turns 146, 148 and 150, the DQN steers left three times where Minimax prefers up.
+On turn 176, the proof guard changes the hybrid's choice. Growth is every three rounds.*
 
 ## Overview
 
-The C++ player speaks the [INSAlgo Snake Competition protocol](https://github.com/INSAlgo/Concours-Snake).
-Its default Minimax agent scores legal moves with alpha-beta search and territory
-and risk estimates. The player also supports DQN and Hybrid policies backed by
-checkpoints produced by the training executable.
+Can a learned Snake player recognize an attacking opportunity that search overlooks?
+This project pairs a deep Q-network (DQN) with Minimax, then tests which policy should
+choose a move when a bounded search cannot prove the outcome. The C++ player speaks the
+[INSAlgo Snake Competition protocol](https://github.com/INSAlgo/Concours-Snake).
+
+## Results
+
+**Guarded Minimax is the two-player research reference.** It uses tuned depth-10 Minimax
+to rank moves and a 20-turn search to protect proven wins and avoid proven losses when
+an alternative exists. Both finalists played the same tuned Minimax opponent on 768
+fresh layouts, once from each seat.
+
+| Policy | Seat 1 | Seat 2 | Overall |
+| --- | ---: | ---: | ---: |
+| Guarded Minimax | 422/768 | 493/768 | **915/1,536 (59.57%)** |
+| Frozen hybrid with the same guard and a 1.0-point Minimax margin | 395/768 | 495/768 | 890/1,536 (57.94%) |
+
+Switching to guarded Minimax gained 314 wins and surrendered 289. The resulting
+**+1.63 percentage points** had a layout-paired 95% interval of **−1.11 to +4.36**.
+The learned selector showed no reliable win advantage, and guarded Minimax requires
+no neural checkpoint. In the separate competition deadline test, all **108,357**
+legal replies arrived within one second on the desktop. The slowest took **386.18 ms**.
+[Research report and experiment results](docs/research-report.md)
+
+The default `AI` executable plays ordinary Minimax. To replay the reference policy
+against tuned Minimax on layout 0 of the paired benchmark from the project root:
+
+```sh
+make -f experiments/tactical-guard/Makefile build/experiments/Evaluate
+printf '7 7\n3\n2 1\n6 4\n3 1\n' | build/experiments/Evaluate
+```
+
+The output `1 46` means seat 1 won in 46 scheduled turns, including the trapped turn.
 
 ---
 
@@ -453,7 +482,13 @@ competition protocol transcripts, training and resumption, DQN and Hybrid play,
 and loading optimized Minimax parameters in play and training. See the
 [testing guide](tests/README.md) for component coverage and CI behavior.
 
-## Future work
+## Match visualization
 
-- Profile Minimax terminal-state checks and assess a transposition table.
-- Benchmark decision throughput, match outcomes and learning convergence.
+The animation at the top was recorded from the two C++ benchmark players. Numbered
+heads show direction, connected segments show the body, and a ring marks the tail.
+The chart tracks each head’s reachable empty cells with both bodies held fixed. The
+sidebar counts legal moves and distinguishes a DQN deviation that was actually played
+from a preferred move changed by the proof guard. Decision time covers the C++
+selection call during recording.
+
+For live games and saved training replays, use the [browser viewer](tools/visualizer/README.md).
