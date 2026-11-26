@@ -98,7 +98,7 @@ int main(int argc, char **argv)
     {
         string_view mode = argc == 1 ? "minimax" : argv[1];
         const char *paramsFile = nullptr;
-        if (((mode == "minimax" && argc == 4) || (mode == "hybrid" && argc == 6)) &&
+        if (((mode == "minimax" && argc == 4) || ((mode == "hybrid" || mode == "hybrid-gap") && argc == 6)) &&
             string_view(argv[argc - 2]) == "--minimax-params")
         {
             paramsFile = argv[argc - 1];
@@ -108,10 +108,11 @@ int main(int argc, char **argv)
         bool minimax = mode == "minimax" && argc <= 2;
         bool dqn = mode == "dqn" && argc == 3;
         bool hybrid = mode == "hybrid" && argc == 4;
-        if (!minimax && !dqn && !hybrid)
+        bool gated = mode == "hybrid-gap" && argc == 4;
+        if (!minimax && !dqn && !hybrid && !gated)
         {
             throw invalid_argument("Usage: AI [minimax [--minimax-params FILE] | dqn CHECKPOINT | "
-                                   "hybrid CHECKPOINT LAMBDA [--minimax-params FILE]]");
+                                   "hybrid CHECKPOINT LAMBDA | hybrid-gap CHECKPOINT MARGIN [--minimax-params FILE]]");
         }
 
         optional<float> hybridWeight;
@@ -134,6 +135,18 @@ int main(int argc, char **argv)
         {
             DQN learner(makeApplicationModelConfig(config.N), mt19937{});
             ModelPersistence{}.loadDQN(learner, argv[2]);
+            if (gated)
+            {
+                size_t end = 0;
+                float margin = stof(argv[3], &end);
+                if (end != string_view(argv[3]).size())
+                {
+                    throw invalid_argument("Invalid override margin");
+                }
+                HybridAgent agent(learner, params, 1.f, false, margin);
+                playGame(engine, agent);
+                return 0;
+            }
             auto agent = makeNeuralAgent(learner, hybridWeight, false, params);
             playGame(engine, *agent);
         }

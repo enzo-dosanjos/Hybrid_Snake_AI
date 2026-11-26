@@ -308,6 +308,15 @@ schema versions before restoring weights and training state.
 `0.5` gives equal weight to the normalized Minimax and neural scores. Hybrid
 weights range from `0` for Minimax scores to `1` for neural scores.
 
+### Minimax override margin
+
+Use `./AI hybrid-gap CHECKPOINT MARGIN --minimax-params FILE` to let the DQN
+choose among legal moves within MARGIN raw search-score units of the best
+Minimax move. Zero permits exact search ties. Search retains its choice on a
+proven win or when all moves lose within its horizon, and excludes proven
+losses when an alternative exists. The existing weighted hybrid is available
+through `./AI hybrid CHECKPOINT LAMBDA`.
+
 ### Training and validation
 
 `training.txt` contains one setup in competition format. It gives the board
@@ -368,6 +377,31 @@ training RNG seed, which defaults to 5489 for a fresh run.
 state, and the absolute update counter. It starts a fresh episode, and the
 save and evaluation intervals count episodes in the current invocation. Pass
 the same training settings when continuing a run.
+
+### Terminal-reward DQN pilot
+
+From the project root, build and run the separate experiment executable:
+
+```sh
+make build/pilot
+build/pilot 25 starts.txt validation.txt experiments/terminal-pilot/pilot.conf runs/pilot
+build/pilot 25 starts.txt validation.txt experiments/terminal-pilot/pilot.conf runs/pilot --resume runs/pilot/episode-25
+```
+
+For LibTorch use the same arguments with `build/pilot-torch` after building
+`make build/pilot-torch TORCH_ROOT="$TORCH_ROOT"`. The episode count is the
+number of additional episodes. The config file sets opponent weights, shallow
+depth, tuned Minimax parameter file, exploration schedule and training settings.
+Run from the project root to resolve relative parameter paths.
+
+The runner samples a training layout, alternates seats, and evaluates against
+the tuned opponent. It assigns +1 for a win, −1 for a loss and zero for
+continuing play. Its exploration rate comes from the cumulative update count.
+Use `--until-epsilon-floor` to stop at the end of the episode that reaches
+the configured floor. Each episode checkpoint directory contains an ordinary
+`model.model` for the player and a `pilot.state` for experiment resume.
+Resume requires matching config, layout and Minimax parameter file contents.
+Earlier experiment snapshots without the companion file remain playable.
 
 ### Minimax parameter optimization
 

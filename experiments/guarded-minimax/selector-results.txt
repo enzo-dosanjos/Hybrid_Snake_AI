@@ -1,0 +1,15 @@
+fork-ranking-IPvdkIFt/ranked.model: OK
+32 archived guard games verified
+minimax seat wins [124, 174]
+ranked seat wins [85, 101]
+random seat wins [79.60000000000001, 105.20000000000002]
+ranked-minimax gained lost by seed [61] [173] mean diff pp -21.875 95%CI [-26.5625    -17.3828125]
+random-minimax gained lost by seed [54 61 60 73 67] [167 182 190 168 174] mean diff pp -22.109374999999996 95%CI [-25.15625 -19.0625 ]
+ranked-random gained lost by seed [ 96 108 110  95 103] [ 95  99  92 112 108] mean diff pp 0.2343749999999995 95%CI [-3.828125   4.2578125]
+latency microseconds minimax S 1314 0.3691872146118721 0.341 0.441
+latency microseconds minimax T 1947 9761.102575243965 3281.8 40773.96999999985
+latency microseconds random S 791 0.4082035398230089 0.321 0.486
+latency microseconds random T 1676 6725.768601431981 2247.615 30666.625
+latency microseconds ranked S 1042 108.00709500959691 85.2805 121.67499999999997
+latency microseconds ranked T 1852 7948.963581533477 2534.41 34225.2299999999
+verified unchanged guard/model/params

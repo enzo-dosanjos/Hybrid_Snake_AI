@@ -1,0 +1,44 @@
+Locked checkpoints and historical choices verified
+Generated 1024 new layouts after excluding 2756 known keys
+finished panel-1 7
+finished panel-1 6
+finished panel-0 6
+finished panel-2 6
+finished panel-3 6
+finished panel-0 4
+finished panel-0 7
+finished panel-3 4
+finished panel-2 5
+finished panel-0 5
+finished panel-1 5
+finished panel-2 4
+finished panel-3 5
+finished panel-1 4
+finished panel-1 0
+finished panel-0 0
+finished panel-2 0
+finished panel-3 0
+finished panel-0 1
+finished panel-1 1
+finished panel-2 1
+finished panel-1 2
+finished panel-3 1
+finished panel-1 3
+finished panel-0 2
+finished panel-2 2
+finished panel-3 2
+finished panel-2 3
+finished panel-3 3
+finished panel-0 3
+finished panel-2 7
+finished panel-3 7
+RESULT 717 triggered/mixed/rankWins/random/used/gained/lost/wins/seatWins 2006 841 429.0 428.1666666666667 1734.0 366 356 1220 [541, 679]
+INTERVAL 717 win/rank pp [-2.1, 3.027] [-3.194, 3.306]
+RESULT 41 triggered/mixed/rankWins/random/used/gained/lost/wins/seatWins 2006 841 416.0 428.1666666666667 1275.0 233 241 1202 [556, 646]
+INTERVAL 41 win/rank pp [-2.539, 1.611] [-4.83, 1.75]
+RESULT 79 triggered/mixed/rankWins/random/used/gained/lost/wins/seatWins 2006 841 462.0 428.1666666666667 1387.0 263 237 1236 [548, 688]
+INTERVAL 79 win/rank pp [-0.879, 3.418] [0.673, 7.344]
+BASELINE 1210 [560, 650]
+PRIMARY win advantage pp 0.45572916666666663 paired CI [-1.514, 2.393]
+SECONDARY rank advantage pp 0.89179548156956 paired CI [-1.407, 3.126]
+verified unchanged artifacts

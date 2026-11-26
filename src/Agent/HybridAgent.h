@@ -30,7 +30,8 @@ class HybridAgent : public Agent {
         // Training mode may take a uniform legal action at the learner's current epsilon.
 
 //---------------------------------------------- Constructors - destructor
-        HybridAgent(DQN &p_dqn, const MinimaxParams &params, float p_lambda, bool p_explore);
+        HybridAgent(DQN &p_dqn, const MinimaxParams &params, float p_lambda, bool p_explore,
+                    std::optional<float> p_margin = std::nullopt);
         // Contract : Lambda is the neural score weight in [0, 1]. The learner must outlive this agent.
 
 //---------------------------------------------------------------- PRIVATE
@@ -43,6 +44,7 @@ class HybridAgent : public Agent {
         Minimax minimax;
         float lambda;
         bool explore;
+        std::optional<float> margin;
 };
 
 #endif //HYBRIDAGENT_H
